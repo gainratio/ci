@@ -103,6 +103,13 @@ SECRET_REFERENCE: Final = re.compile(
     re.IGNORECASE,
 )
 DYNAMIC_SECRET_REFERENCE: Final = re.compile(r"secrets\s*\[\s*(?!['\"])")
+# Oldest hseshadr/ci commit each central module may be pinned at. Raise a floor in the same PR
+# that ships a fix every consumer must run. cloudflare-pages and python-package embed
+# portfolio-foundation at their own revision, so the foundation floor covers them too.
+REQUIRED_MINIMUM: Final[Mapping[str, str]] = MappingProxyType(
+    {"portfolio-foundation": "dd19871486588b1582e432b7bc1f2cfffb296340"}
+)
+DESCENDANT_STATUSES: Final = frozenset(("ahead", "identical"))
 APPROVED_PUBLISHER_MODULES: Final = frozenset(("github.com/hseshadr/ci/modules/npm-publisher",))
 type Scalar = str | bool | int
 type RemoteIdentity = tuple[str, str, str, str]
@@ -285,6 +292,20 @@ class RepositoryExpectation:
 
 
 @validated_dataclass(config=BOUNDARY_CONFIG)
+class PinAncestry:
+    """GitHub compare evidence for one central module pin.
+
+    ``floor_status`` is ``compare/<floor>...<pin>`` and ``main_status`` is
+    ``compare/<pin>...main``; ``unrelated`` records a compare without a common ancestor.
+    """
+
+    floor: str
+    pin: str
+    floor_status: str
+    main_status: str
+
+
+@validated_dataclass(config=BOUNDARY_CONFIG)
 class RepositorySnapshot:
     """All authoritative source, protection, and integration evidence."""
 
@@ -301,6 +322,7 @@ class RepositorySnapshot:
     missing_dagger_configs: tuple[str, ...] = Field(default_factory=tuple)
     environments: tuple[DeploymentEnvironment, ...] = Field(default_factory=tuple)
     repository_secret_names: tuple[str, ...] = Field(default_factory=tuple)
+    pin_ancestry: tuple[PinAncestry, ...] = Field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -431,6 +453,7 @@ def validate_dagger_graph(
     if graph_has_cycle(snapshot.dagger_configs):
         findings.append(finding("dagger-dependency-cycle", "dagger.json", "dependency cycle"))
     findings.extend(validate_shared_requirement(snapshot.dagger_configs, expectation))
+    findings.extend(validate_minimum_pins(snapshot.dagger_configs, snapshot.pin_ancestry))
     return tuple(findings)
 
 
@@ -1820,3 +1843,53 @@ def validate_control_plane(snapshot: RepositorySnapshot) -> tuple[PolicyFinding,
 def allowed_check_apps() -> frozenset[str]:
     """Return execution ownership plus the reviewed advisory-only integration."""
     return frozenset(("github-actions", "gitguardian"))
+
+
+def required_minimum_pins(configs: tuple[DaggerConfig, ...]) -> tuple[tuple[str, str], ...]:
+    """Return each distinct (floor, pin) pair that needs ancestry evidence."""
+    pairs = (floored_pin(config) for config in configs)
+    return tuple(dict.fromkeys(pair for pair in pairs if pair is not None))
+
+
+def floored_pin(config: DaggerConfig) -> tuple[str, str] | None:
+    """Return (floor, pin) for one exact hseshadr/ci module config with a floor."""
+    remote = parse_pinned_remote(config.identity)
+    if remote is None or remote[:2] != ("hseshadr", "ci"):
+        return None
+    floor = REQUIRED_MINIMUM.get(remote[2].removeprefix("modules/"))
+    return None if floor is None else (floor, remote[3])
+
+
+def validate_minimum_pins(
+    configs: tuple[DaggerConfig, ...], ancestry: tuple[PinAncestry, ...]
+) -> tuple[PolicyFinding, ...]:
+    """Require every floored central pin to be on main and descend from its floor."""
+    evidence = {(item.floor, item.pin): item for item in ancestry}
+    pairs = required_minimum_pins(configs)
+    return tuple(
+        minimum_finding(floor, pin, evidence.get((floor, pin)))
+        for floor, pin in pairs
+        if not pin_meets_floor(evidence.get((floor, pin)))
+    )
+
+
+def minimum_finding(floor: str, pin: str, item: PinAncestry | None) -> PolicyFinding:
+    """Name the stale central pin and the ancestry fact that failed."""
+    return finding("pin-below-required-minimum", pin, minimum_message(floor, item))
+
+
+def pin_meets_floor(item: PinAncestry | None) -> bool:
+    """Accept only a pin at or after its floor that main also contains."""
+    if item is None:
+        return False
+    return {item.floor_status, item.main_status} <= DESCENDANT_STATUSES
+
+
+def minimum_message(floor: str, item: PinAncestry | None) -> str:
+    """Explain which ancestry fact failed without guessing missing evidence."""
+    if item is None:
+        return f"no ancestry evidence against required minimum {floor}"
+    return (
+        f"must descend from required minimum {floor} on main "
+        f"(floor...pin={item.floor_status}, pin...main={item.main_status})"
+    )

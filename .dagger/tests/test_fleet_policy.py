@@ -6,10 +6,12 @@ from datetime import date, timedelta
 import pytest
 
 from ci.fleet_policy import (
+    REQUIRED_MINIMUM,
     CheckRun,
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
+    PinAncestry,
     Protection,
     RepositoryExpectation,
     RepositorySnapshot,
@@ -26,6 +28,15 @@ UPLOAD = "3" * 40
 DOWNLOAD = "4" * 40
 PYPI = "5" * 40
 HEAD_SHA = "${{ github.event.workflow_run.head_sha }}"
+CURRENT_PINS = tuple(
+    PinAncestry(
+        floor=REQUIRED_MINIMUM["portfolio-foundation"],
+        pin=pin,
+        floor_status="ahead",
+        main_status="ahead",
+    )
+    for pin in ("b" * 40, SHA)
+)
 
 MODULE = """
 @object_type
@@ -190,6 +201,7 @@ def _snapshot(
         check_apps=("github-actions",),
         codeql_default_state="not-configured",
         legacy_references=(),
+        pin_ancestry=CURRENT_PINS,
     )
 
 
@@ -1761,3 +1773,23 @@ def test_should_grandfather_only_missing_shared_module_until_expiry() -> None:
     assert "missing-shared-module" not in active
     assert "mutable-action" in active
     assert "missing-shared-module" in expired
+
+
+def test_should_report_stale_foundation_pin_through_repository_contract() -> None:
+    # Given an otherwise valid consumer whose foundation pin predates the required floor
+    source = "github.com/hseshadr/ci/modules/portfolio-foundation@" + "b" * 40
+    stale = PinAncestry(
+        floor=REQUIRED_MINIMUM["portfolio-foundation"],
+        pin="b" * 40,
+        floor_status="behind",
+        main_status="ahead",
+    )
+    snapshot = replace(
+        _snapshot(INGRESS), dagger_configs=_shared_configs(source), pin_ancestry=(stale,)
+    )
+
+    # When the complete repository contract is evaluated
+    codes = _shared_codes(snapshot)
+
+    # Then the stale release gate is the only failure
+    assert codes == ("pin-below-required-minimum",)

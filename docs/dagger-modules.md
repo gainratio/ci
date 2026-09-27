@@ -49,6 +49,31 @@ shape (the example SHA is illustrative):
 plus `main`, `latest`, version tags, shortened SHAs, uppercase hexadecimal, and every other
 mutable or non-canonical dependency reference.
 
+### Required minimum pins
+
+An exact pin is not enough on its own: a consumer can stay pinned below a fix it must have, and
+nothing breaks until a release gate trips on the old bug. Fleet policy therefore keeps a
+reviewed floor per central module in `REQUIRED_MINIMUM` (`.dagger/src/ci/fleet_policy.py`):
+
+| Module | Floor | Why |
+| --- | --- | --- |
+| `portfolio-foundation` | `dd19871486588b1582e432b7bc1f2cfffb296340` | `greenMain` tolerates GitHub rerun `created_at` skew (#46); older pins can block a release. |
+
+`cloudflare-pages` and `python-package` load `portfolio-foundation` from their own revision, so
+the foundation floor also applies to pins of those modules.
+
+For every floored module revision in a consumer's resolved Dagger graph, the scanner asks
+GitHub `compare/<floor>...<pin>` and `compare/<pin>...main` on `hseshadr/ci`. Both must answer
+`ahead` or `identical`: the pin is at or after the floor **and** on central `main`. Anything
+else (`behind`, `diverged`, no common history, or missing evidence) is a
+`pin-below-required-minimum` finding that fails the check.
+
+**When you ship a fix every consumer must run, raise the floor in the same PR.** Set the
+module's `REQUIRED_MINIMUM` entry to the fix commit, update the literal pinned in
+`.dagger/tests/test_fleet_minimum_pin.py`, and add a row above. Non-mandatory changes do not
+move the floor. After merge, the fleet scan names every consumer still below it, and each one
+needs a bump PR.
+
 This remote-pin rule applies to consumers. Central CI intentionally keeps its foundation as a
 local same-tree dependency so it validates the module bytes in the current commit; a remote
 self-pin would instead validate an older published copy.

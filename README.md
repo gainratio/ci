@@ -112,6 +112,8 @@ For every exact consumer `main`, the scanner requires:
 - managed CodeQL default setup is disabled;
 - no independent execution app controls the build or deploy path;
 - no live workflow executes a retired `hseshadr/ci` reusable control.
+- every pinned central module is on `hseshadr/ci` `main` and at or after its reviewed
+  required-minimum floor ([details](docs/dagger-modules.md#required-minimum-pins)).
 
 GitGuardian is allowed only as a non-required advisory observer.
 

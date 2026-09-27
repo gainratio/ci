@@ -638,3 +638,46 @@ def test_should_fail_closed_on_invalid_exact_dagger_metadata(
     # When the boundary validates that config
     with pytest.raises(FleetAccessError, match=message):
         read_repository(FakeTransport(responses), "hseshadr", "example")
+
+
+FLOOR = "dd19871486588b1582e432b7bc1f2cfffb296340"
+COMPARE_FLOOR = f"repos/hseshadr/ci/compare/{FLOOR}...{'b' * 40}?per_page=1"
+COMPARE_MAIN = f"repos/hseshadr/ci/compare/{'b' * 40}...main?per_page=1"
+
+
+def test_should_read_floor_and_main_ancestry_for_floored_central_pin() -> None:
+    # Given GitHub compare evidence for the consumer's central foundation pin
+    responses = _responses()
+    responses[COMPARE_FLOOR] = _json({"status": "behind", "ahead_by": 0})
+    responses[COMPARE_MAIN] = _json({"status": "ahead"})
+
+    # When the repository is read
+    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+
+    # Then both comparisons are typed ancestry evidence for policy
+    evidence = snapshot.pin_ancestry
+    assert [(item.floor, item.pin) for item in evidence] == [(FLOOR, "b" * 40)]
+    assert (evidence[0].floor_status, evidence[0].main_status) == ("behind", "ahead")
+
+
+def test_should_record_unrelated_history_when_compare_has_no_common_ancestor() -> None:
+    # Given GitHub cannot compare the pin because it shares no history with the floor
+    responses = _responses()
+
+    # When the repository is read (both compares answer 404)
+    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+
+    # Then the pin is recorded as unrelated rather than silently accepted
+    assert snapshot.pin_ancestry[0].floor_status == "unrelated"
+    assert snapshot.pin_ancestry[0].main_status == "unrelated"
+
+
+def test_should_fail_closed_when_compare_endpoint_errors() -> None:
+    # Given the compare endpoint is unavailable
+    responses = _responses()
+    responses[COMPARE_FLOOR] = _json({}, status=500)
+
+    # When the repository is read
+    # Then the scan fails instead of guessing ancestry
+    with pytest.raises(FleetAccessError, match="compare"):
+        read_repository(FakeTransport(responses), "hseshadr", "example")
