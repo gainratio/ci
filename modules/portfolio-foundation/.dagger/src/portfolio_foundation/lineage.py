@@ -202,11 +202,9 @@ def provenance_context(evidence: LineageEvidence) -> str:
         "GITHUB_REF": ref,
         "GITHUB_RUN_ATTEMPT": str(run.run_attempt),
         "GITHUB_RUN_ID": str(run.id),
-        "GITHUB_SERVER_URL": SERVER_URL,
         "GITHUB_SHA": run.head_sha,
         "GITHUB_WORKFLOW": run.name,
         "GITHUB_WORKFLOW_REF": f"{run.repository.full_name}/{PUBLISH_WORKFLOW}@{ref}",
-        "RUNNER_ENVIRONMENT": "github-hosted",
     }
     return json.dumps(dict(sorted(context.items())), indent=2) + "\n"
 
@@ -216,6 +214,8 @@ def _repository_context(run: LineageRunPayload) -> dict[str, str]:
         "GITHUB_REPOSITORY": run.repository.full_name,
         "GITHUB_REPOSITORY_ID": str(run.repository.id),
         "GITHUB_REPOSITORY_OWNER_ID": str(run.repository.owner.id),
+        "GITHUB_SERVER_URL": SERVER_URL,
+        "RUNNER_ENVIRONMENT": "github-hosted",
     }
 
 
