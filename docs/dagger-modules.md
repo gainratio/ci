@@ -463,6 +463,22 @@ authoritative fleet evidence before merge, followed by exact-main evidence after
 the merged SHA against `^[0-9a-f]{40}$` and record it in the durable release ledger; a temporary
 file alone is not release evidence.
 
+## Fleet coverage
+
+The fleet scan checks only the repositories named in `repository_expectations`
+(`.dagger/src/ci/fleet.py`). That list is written by hand, so a new consumer would otherwise
+escape every fleet check. To close that gap, each hosted scan first lists every public
+`hseshadr` repository, reads its default-branch `dagger.json`, and reports
+`uncovered-consumer` for any active repository that pins a `github.com/hseshadr/ci` module but is
+missing from the list. The scan then fails.
+
+- **When you onboard a consumer, add it to `repository_expectations` in the same PR.** Also add
+  it to `KNOWN_CONSUMERS` in `.dagger/tests/test_fleet_coverage.py`.
+- Archived repositories are skipped. Private repositories are not listed, so they are not
+  discovered.
+- A repository whose evidence cannot be read (for example, `main` has no branch protection)
+  gets an `evidence-unreadable` finding. The scan keeps going and still fails.
+
 ## Release status
 
 Shipped in this central change:

@@ -23,6 +23,8 @@ dagger call fleet --github-token=env:GITHUB_TOKEN --include-central
 The first command runs central quality and security checks. The second reads exact
 `main` state from GitHub for:
 
+- `agentic-context-service`
+- `agentic-saga`
 - `almamesh`
 - `aml-filter`
 - `assay`
@@ -32,7 +34,8 @@ The first command runs central quality and security checks. The second reads exa
 - `privacy-core`
 - `ci`
 
-Any inaccessible or incomplete evidence is an error. A scan that inspected nothing
+It also fails if any other `hseshadr` repository pins a `github.com/hseshadr/ci` module but
+is missing from that list. Any inaccessible or incomplete evidence is an error. A scan that inspected nothing
 cannot report success.
 
 ## Reuse the Dagger legos

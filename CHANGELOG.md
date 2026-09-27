@@ -26,6 +26,10 @@
   evidence.
 - Optional typed Git authorization for exact private-repository history in
   `portfolio-foundation`, kept inside Dagger's secret boundary.
+- Fleet coverage: `agentic-saga` and `agentic-context-service` join the fleet scan, and every
+  scan now discovers `hseshadr/ci` consumers from default-branch `dagger.json` and fails with
+  `uncovered-consumer` for any that are not listed. Unreadable repositories become an
+  `evidence-unreadable` finding, so they no longer stop the scan.
 
 ### Changed
 

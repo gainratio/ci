@@ -10,8 +10,10 @@ def test_should_enforce_exact_consumer_set_when_central_is_not_main() -> None:
     # When the immutable fleet expectations are selected
     expectations = repository_expectations(include_central)
 
-    # Then exactly the seven migrated consumers require sole Dagger
+    # Then exactly the nine migrated consumers require sole Dagger
     assert tuple(item.name for item in expectations) == (
+        "agentic-context-service",
+        "agentic-saga",
         "almamesh",
         "aml-filter",
         "assay",
