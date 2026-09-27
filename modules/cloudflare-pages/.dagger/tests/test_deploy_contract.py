@@ -81,6 +81,30 @@ def deployments() -> dict[str, object]:
         "result_info": {"count": len(result), "page": 1, "per_page": 10,
         "total_count": len(result), "total_pages": int(bool(result))}}
 
+ROLL = "/client/v4/accounts/" + ACCOUNT + "/pages/projects/edge-roll"
+ROLL_LIVE = "11111111"
+
+def rid(short: str) -> str:
+    return short + "-0000-4000-8000-000000000000"
+
+def roll_row(short: str, status: str = "success") -> dict[str, object]:
+    return {"id": rid(short), "short_id": short, "url": "https://" + short + ".edge-roll.pages.dev",
+        "project_id": "roll-project-id", "project_name": "edge-roll", "environment": "production",
+        "latest_stage": {"name": "deploy", "status": status, "ended_on": None},
+        "deployment_trigger": {"type": "ad_hoc", "metadata": {"branch": "main",
+        "commit_hash": "", "commit_dirty": False, "commit_message": "ignored"}}, "aliases": None}
+
+def roll_project() -> dict[str, object]:
+    return {"errors": [], "messages": [], "success": True, "result": {"id": "roll-project-id",
+        "name": "edge-roll", "production_branch": "main", "domains": ["edge-roll.pages.dev"],
+        "source": None, "canonical_deployment": roll_row(ROLL_LIVE),
+        "latest_deployment": roll_row("11111111")}}
+
+def roll_history() -> dict[str, object]:
+    result = [roll_row("11111111"), roll_row("33333333", "failure"), roll_row("22222222")]
+    return {"errors": [], "messages": [], "success": True, "result": result,
+        "result_info": {"count": 3, "page": 1, "per_page": 10, "total_count": 3, "total_pages": 1}}
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None: return
     def send(self, value: object) -> None:
@@ -93,6 +117,10 @@ class Handler(BaseHTTPRequestHandler):
             EVENTS.append("get-project"); self.send(project(not GIT_DISABLED, "none" if GIT_DISABLED else "all")); return
         if self.path == PROJECT + "/deployments?env=production&per_page=10":
             EVENTS.append("get-deployments"); self.send(deployments()); return
+        if self.path == ROLL:
+            EVENTS.append("get-roll-project"); self.send(roll_project()); return
+        if self.path == ROLL + "/deployments?env=production&per_page=10":
+            EVENTS.append("get-roll-deployments"); self.send(roll_history()); return
         if self.path.endswith("/__mock/events"):
             payload = project(False, "none"); payload["result"]["domains"] = EVENTS
             self.send(payload); return
@@ -110,6 +138,14 @@ class Handler(BaseHTTPRequestHandler):
             GIT_DISABLED = True; EVENTS.append("disable-git"); self.send(project(False, "none")); return
         self.send_error(404)
 
+    def do_POST(self) -> None:
+        global ROLL_LIVE
+        assert self.headers.get("Content-Length") == "0"
+        if self.path == ROLL + "/deployments/" + rid("22222222") + "/rollback":
+            ROLL_LIVE = "22222222"; EVENTS.append("rollback")
+            self.send({"errors": [], "messages": [], "success": True, "result": roll_row("22222222")}); return
+        self.send_error(404)
+
 health = HTTPServer(("0.0.0.0", 8080), Handler)
 threading.Thread(target=health.serve_forever, daemon=True).start()
 server = HTTPServer(("0.0.0.0", 443), Handler)
@@ -121,8 +157,9 @@ FIXTURE_MAIN = r"""from __future__ import annotations
 import json
 import dagger
 from dagger import dag, function, object_type
-from cloudflare_pages.api import CloudflarePolicyError, deploy_verified_artifact
-from cloudflare_pages.main import (CurlPagesOperations, NODE_IMAGE, WRANGLER_OUTPUT_PATH, _jq_binary,
+from cloudflare_pages.api import (CloudflarePolicyError, deploy_verified_artifact,
+  live_production_deployment, rollback_production)
+from cloudflare_pages.main import (CurlPagesOperations, CurlRollbackOperations, NODE_IMAGE, WRANGLER_OUTPUT_PATH, _jq_binary,
   _prepare_deploy_artifact, _uncached, _verify_envelope, _wrangler_script,
   wrangler_deploy_args)
 from cloudflare_pages.models import AttemptIdentity, CreatedDeployment, GitHubEvidence, PagesTarget
@@ -262,6 +299,21 @@ async def functions_contract(token: dagger.Secret, account: dagger.Secret,
     events = json.loads(await operations._request("GET", "/__mock/events"))["result"]["domains"]
     assert events.count("upload") == 2
 
+async def rollback_contract(token: dagger.Secret, account: dagger.Secret,
+    mock: dagger.Service, cert: dagger.File) -> None:
+    roll = CurlRollbackOperations(token, account, "edge-roll", mock, cert)
+    recorded = await live_production_deployment(roll, "edge-roll")
+    assert recorded.id == "11111111-0000-4000-8000-000000000000"
+    rolled = await rollback_production(roll, "edge-roll", None)
+    assert rolled.from_deployment_id == recorded.id
+    assert rolled.to_deployment_id == rolled.live_deployment_id == "22222222-0000-4000-8000-000000000000"
+    assert rolled.live_deployment_url == "https://22222222.edge-roll.pages.dev"
+    try: await rollback_production(roll, "edge-roll", rolled.live_deployment_id)
+    except CloudflarePolicyError: pass
+    else: raise ValueError("no-op rollback reached provider transport")
+    events = json.loads(await roll._request("GET", "/__mock/events"))["result"]["domains"]
+    assert events.count("rollback") == 1
+
 @object_type
 class ProviderContract:
     @function
@@ -277,6 +329,7 @@ class ProviderContract:
         assert events == ["wrangler-preflight", "get-project", "get-deployments", "disable-git", "get-project", "upload", "get-deployments"]
         assert result.source_sha == SHA
         await functions_contract(token, account, mock, fixture_files().file("ca.pem"))
+        await rollback_contract(token, account, mock, fixture_files().file("ca.pem"))
         tampered = envelope.with_new_file("artifact/dist/index.html", "tampered")
         try: await _verify_envelope(tampered, "hseshadr/edge-reco@" + SHA, "b" * 40 + ":44", ["dist"])
         except dagger.QueryError: return "provider order, runnable module tree, multipart, escape, conflict, and tamper rejection passed"

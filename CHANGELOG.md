@@ -4,6 +4,9 @@
 
 ### Added
 
+- Per-module required-minimum pin floors: the fleet scan reports
+  `pin-below-required-minimum` for any consumer whose central module pin is not on `main` at
+  or after the reviewed floor (`portfolio-foundation` ≥ `dd19871`, hseshadr/ci#46).
 - Reusable `portfolio-foundation` and `cloudflare-pages` Dagger modules for exact source
   identity, repository safety, deterministic artifact evidence, exact-green authorization,
   and fail-closed Pages delivery.

@@ -20,12 +20,14 @@ from ci.fleet_policy import (
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
+    PinAncestry,
     Protection,
     RepositorySnapshot,
     RequiredCheck,
     SourceFile,
     local_dependency_path,
     parse_pinned_remote,
+    required_minimum_pins,
 )
 
 BOUNDARY_CONFIG: Final = ConfigDict(frozen=True, extra="ignore", strict=True)
@@ -33,6 +35,7 @@ WORKFLOW_PREFIX: Final = ".github/workflows/"
 MODULE_PREFIXES: Final = (".dagger/src/", "dagger/src/")
 HTTP_OK: Final = 200
 HTTP_NOT_FOUND: Final = 404
+CENTRAL_REPOSITORY: Final = "repos/hseshadr/ci"
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,7 @@ class SourceEvidence:
     sources: tuple[SourceFile, ...]
     configs: tuple[DaggerConfig, ...]
     missing: tuple[str, ...]
+    ancestry: tuple[PinAncestry, ...]
 
 
 @dataclass(frozen=True)
@@ -173,6 +177,13 @@ class CommitPayload:
     """GitHub commit identity response."""
 
     sha: str
+
+
+@validated_dataclass(config=BOUNDARY_CONFIG)
+class ComparePayload:
+    """GitHub compare ancestry status (ahead, behind, identical, or diverged)."""
+
+    status: str
 
 
 @validated_dataclass(config=BOUNDARY_CONFIG)
@@ -380,7 +391,32 @@ def read_source_evidence(
     identity = f"github.com/{owner}/{name}@{sha}"
     location = ModuleLocation(base, sha, "dagger.json", identity)
     configs, missing = read_dagger_graph(transport, location, tree)
-    return SourceEvidence(name, sha, sources, configs, missing)
+    ancestry = read_pin_ancestry(transport, configs)
+    return SourceEvidence(name, sha, sources, configs, missing, ancestry)
+
+
+def read_pin_ancestry(
+    transport: GitHubTransport, configs: tuple[DaggerConfig, ...]
+) -> tuple[PinAncestry, ...]:
+    """Compare every floored central pin against its floor and central main."""
+    return tuple(
+        PinAncestry(
+            floor=floor,
+            pin=pin,
+            floor_status=read_compare_status(transport, floor, pin),
+            main_status=read_compare_status(transport, pin, "main"),
+        )
+        for floor, pin in required_minimum_pins(configs)
+    )
+
+
+def read_compare_status(transport: GitHubTransport, base: str, head: str) -> str:
+    """Return GitHub's ancestry status; a 404 means no common history."""
+    path = f"{CENTRAL_REPOSITORY}/compare/{base}...{head}?per_page=1"
+    response = transport.get(path)
+    if response.status == HTTP_NOT_FOUND:
+        return "unrelated"
+    return parse_model(response, path, ComparePayload).status
 
 
 def assert_main_stable(transport: GitHubTransport, base: str, expected_sha: str) -> None:
@@ -404,7 +440,11 @@ def read_snapshot_parts(
 
 def read_model[T](transport: GitHubTransport, path: str, model: type[T]) -> T:
     """Validate one successful GitHub response against its exact schema."""
-    response = transport.get(path)
+    return parse_model(transport.get(path), path, model)
+
+
+def parse_model[T](response: HttpResponse, path: str, model: type[T]) -> T:
+    """Validate one already-read GitHub response against its exact schema."""
     if response.status != HTTP_OK:
         raise access_error(path, response.status)
     try:
@@ -751,6 +791,7 @@ def create_snapshot(parts: SnapshotParts, projection: SnapshotProjection) -> Rep
         missing_dagger_configs=evidence.missing,
         environments=parts.environments,
         repository_secret_names=parts.repository_secrets,
+        pin_ancestry=evidence.ancestry,
     )
 
 

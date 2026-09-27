@@ -23,6 +23,7 @@ PAGES_COMMIT_SHA_TEXT: Final = r"\A(?:[0-9a-f]{40})?\z"
 NUMERIC_ID_TEXT: Final = r"\A[1-9][0-9]*\z"
 TIMESTAMP_TEXT: Final = r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\z"
 DEPLOY_ROOT_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+DEPLOYMENT_ID_PATTERN: Final = re.compile(r"[0-9a-f][0-9a-f-]{0,63}")
 
 
 class ClosedModel(BaseModel):  # type: ignore[explicit-any]  # Pydantic v2 base stub
@@ -217,6 +218,15 @@ class DeploymentsResponse(ClosedModel):  # type: ignore[explicit-any]  # Pydanti
     result_info: ResultInfo
 
 
+class DeploymentResponse(ClosedModel):  # type: ignore[explicit-any]  # Pydantic v2 base stub
+    """Strict projected Cloudflare response for one Pages deployment."""
+
+    errors: tuple[ApiProblem, ...]
+    messages: tuple[ApiProblem, ...]
+    result: ListedPagesDeployment
+    success: bool
+
+
 class WranglerOutput(ClosedModel):  # type: ignore[explicit-any]  # Pydantic v2 base stub
     """Pinned Wrangler 4.103.0 pages-deploy JSONL record."""
 
@@ -308,6 +318,17 @@ class ProviderDeploymentEvidence:
     branch: str
     source_sha: str
     attempt_identity: AttemptIdentity
+
+
+@dataclass(frozen=True)
+class RollbackEvidence:
+    """Non-secret proof that production moved from one deployment to another."""
+
+    project: str
+    from_deployment_id: str
+    to_deployment_id: str
+    live_deployment_id: str
+    live_deployment_url: str
 
 
 @dataclass(frozen=True)

@@ -20,17 +20,23 @@ from .api import (
     CloudflarePolicyError,
     deploy_verified_artifact,
     disable_git_payload,
+    live_production_deployment,
     preflight_provider,
     provider_error_message,
     require_evidence_binding,
+    rollback_production,
     verify_current_deployment,
 )
 from .models import (
+    DEPLOYMENT_ID_PATTERN,
+    PROJECT_PATTERN,
     AttemptIdentity,
     CreatedDeployment,
     GitHubEvidence,
+    ListedPagesDeployment,
     PagesTarget,
     ProviderDeploymentEvidence,
+    RollbackEvidence,
     WranglerBuildMetadata,
     WranglerOutput,
 )
@@ -101,6 +107,7 @@ FUNCTIONS_TOOLCHAIN_INPUTS: Final = frozenset(
         PurePosixPath("/usr/local/lib/node_modules/wrangler/templates/pages-template-worker.ts"),
     }
 )
+type CurlMethod = Literal["GET", "PATCH", "POST"]
 FUNCTIONS_SOURCE_EXCLUDES: Final = [
     "**/node_modules",
     "**/package.json",
@@ -151,6 +158,26 @@ class DeploymentEvidence:
     run_attempt: int = field()
 
 
+@object_type
+class ProductionDeployment:
+    """The production deployment served now: the rollback target to record."""
+
+    project: str = field()
+    deployment_id: str = field()
+    deployment_url: str = field()
+
+
+@object_type
+class ProductionRollbackEvidence:
+    """Non-secret proof that production now serves the rollback target."""
+
+    project: str = field()
+    from_deployment_id: str = field()
+    to_deployment_id: str = field()
+    live_deployment_id: str = field()
+    live_deployment_url: str = field()
+
+
 @dataclass(frozen=True)
 class CurlPagesOperations:
     """Pinned, secret-safe Dagger adapters for one Pages target."""
@@ -190,29 +217,14 @@ class CurlPagesOperations:
     async def sleep(self, seconds: int) -> None:
         await asyncio.sleep(seconds)
 
-    async def _request(self, method: Literal["GET", "PATCH"], suffix: str, body: str = "") -> str:
-        request = self._request_container(method, suffix, body)
-        try:
-            result = await asyncio.wait_for(_request_result(request), CURL_DEADLINE_SECONDS)
-        except (TimeoutError, dagger.QueryError):
-            raise CloudflareApiError("Cloudflare network request failed") from None
-        return _require_http_success(*result)
+    async def _request(self, method: CurlMethod, suffix: str, body: str = "") -> str:
+        return await _send_request(self._request_container(method, suffix, body))
 
-    def _request_container(
-        self, method: Literal["GET", "PATCH"], suffix: str, body: str
-    ) -> dagger.Container:
-        base = dag.container(platform=dagger.Platform("linux/amd64")).from_(CURL_IMAGE)
-        base = base.with_entrypoint([]).with_user("0").with_mounted_temp("/work")
-        base = base.with_workdir("/work")
-        base = base.with_mounted_secret("/run/secrets/token", self.api_token)
-        base = base.with_mounted_secret("/run/secrets/account", self.account_id)
-        base = base.with_mounted_file("/run/jq", _jq_binary())
-        if self.api_service is not None:
-            base = base.with_service_binding("api.cloudflare.com", self.api_service)
-        if self.ca_certificate is not None:
-            base = base.with_mounted_file("/run/mock-ca.pem", self.ca_certificate)
-        command = ["/bin/sh", "-euc", _curl_script(), "--", method, suffix]
-        return _uncached(base).with_exec(command, stdin=body)
+    def _request_container(self, method: CurlMethod, suffix: str, body: str) -> dagger.Container:
+        transport = CurlTransport(
+            self.api_token, self.account_id, self.api_service, self.ca_certificate
+        )
+        return _curl_request_container(transport, method, suffix, body)
 
     def _upload_container(self, artifact: dagger.Directory, source_sha: str) -> dagger.Container:
         base = _wrangler_base().with_mounted_directory("/artifact", artifact, read_only=True)
@@ -230,6 +242,56 @@ class CurlPagesOperations:
 
     def _project_suffix(self) -> str:
         return f"/pages/projects/{self.target.project}"
+
+
+@dataclass(frozen=True)
+class CurlTransport:
+    """Secret-safe credentials and optional test-only mock bindings for curl."""
+
+    api_token: dagger.Secret
+    account_id: dagger.Secret
+    api_service: dagger.Service | None = None
+    ca_certificate: dagger.File | None = None
+
+
+@dataclass(frozen=True)
+class CurlRollbackOperations:
+    """Pinned curl adapter for read-only history reads and one rollback POST."""
+
+    api_token: dagger.Secret
+    account_id: dagger.Secret
+    project: str
+    api_service: dagger.Service | None = None
+    ca_certificate: dagger.File | None = None
+
+    def __post_init__(self) -> None:
+        if PROJECT_PATTERN.fullmatch(self.project) is None:
+            raise CloudflarePolicyError("Cloudflare Pages project name is malformed")
+
+    async def get_project(self) -> str:
+        return await self._request("GET", self._project_suffix())
+
+    async def get_deployments(self) -> str:
+        suffix = f"{self._project_suffix()}/deployments?env=production&per_page=10"
+        return await self._request("GET", suffix)
+
+    async def rollback(self, deployment_id: str) -> str:
+        if DEPLOYMENT_ID_PATTERN.fullmatch(deployment_id) is None:
+            raise CloudflarePolicyError("Cloudflare Pages deployment id is malformed")
+        suffix = f"{self._project_suffix()}/deployments/{deployment_id}/rollback"
+        return await self._request("POST", suffix)
+
+    async def sleep(self, seconds: int) -> None:
+        await asyncio.sleep(seconds)
+
+    async def _request(self, method: CurlMethod, suffix: str, body: str = "") -> str:
+        transport = CurlTransport(
+            self.api_token, self.account_id, self.api_service, self.ca_certificate
+        )
+        return await _send_request(_curl_request_container(transport, method, suffix, body))
+
+    def _project_suffix(self) -> str:
+        return f"/pages/projects/{self.project}"
 
 
 @object_type
@@ -271,6 +333,30 @@ class CloudflarePages:
                              cloudflare_account_id, workflow_run_id, run_attempt,
                              inputs, consumer_identity, producing_identity, allowed_roots)
     # fmt: on
+
+    @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
+    async def previous_production_deployment(
+        self,
+        cloudflare_api_token: dagger.Secret,
+        cloudflare_account_id: dagger.Secret,
+        project: str,
+    ) -> ProductionDeployment:
+        """Read-only: record the deployment production serves now, before a new deploy."""
+        operations = CurlRollbackOperations(cloudflare_api_token, cloudflare_account_id, project)
+        return _public_production(project, await live_production_deployment(operations, project))
+
+    @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
+    async def rollback(
+        self,
+        cloudflare_api_token: dagger.Secret,
+        cloudflare_account_id: dagger.Secret,
+        project: str,
+        deployment_id: str = "",
+    ) -> ProductionRollbackEvidence:
+        """Roll production back to deployment_id, or the previous successful one."""
+        operations = CurlRollbackOperations(cloudflare_api_token, cloudflare_account_id, project)
+        evidence = await rollback_production(operations, project, deployment_id or None)
+        return _public_rollback(evidence)
 
     # fmt: off
     @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
@@ -716,6 +802,31 @@ def _wrangler_base() -> dagger.Container:
     return base.with_env_variable("WRANGLER_SEND_METRICS", "false").with_exec(install)
 
 
+def _curl_request_container(
+    transport: CurlTransport, method: CurlMethod, suffix: str, body: str
+) -> dagger.Container:
+    base = dag.container(platform=dagger.Platform("linux/amd64")).from_(CURL_IMAGE)
+    base = base.with_entrypoint([]).with_user("0").with_mounted_temp("/work")
+    base = base.with_workdir("/work")
+    base = base.with_mounted_secret("/run/secrets/token", transport.api_token)
+    base = base.with_mounted_secret("/run/secrets/account", transport.account_id)
+    base = base.with_mounted_file("/run/jq", _jq_binary())
+    if transport.api_service is not None:
+        base = base.with_service_binding("api.cloudflare.com", transport.api_service)
+    if transport.ca_certificate is not None:
+        base = base.with_mounted_file("/run/mock-ca.pem", transport.ca_certificate)
+    command = ["/bin/sh", "-euc", _curl_script(), "--", method, suffix]
+    return _uncached(base).with_exec(command, stdin=body)
+
+
+async def _send_request(request: dagger.Container) -> str:
+    try:
+        result = await asyncio.wait_for(_request_result(request), CURL_DEADLINE_SECONDS)
+    except (TimeoutError, dagger.QueryError):
+        raise CloudflareApiError("Cloudflare network request failed") from None
+    return _require_http_success(*result)
+
+
 def _jq_binary() -> dagger.File:
     image = dag.container(platform=dagger.Platform("linux/amd64")).from_(JQ_IMAGE)
     return image.file("/jq")
@@ -794,6 +905,24 @@ def _public_evidence(source: ProviderDeploymentEvidence) -> DeploymentEvidence:
     return evidence
 
 
+def _public_production(project: str, source: ListedPagesDeployment) -> ProductionDeployment:
+    deployment = ProductionDeployment.__new__(ProductionDeployment)
+    deployment.project = project
+    deployment.deployment_id = source.id
+    deployment.deployment_url = source.url
+    return deployment
+
+
+def _public_rollback(source: RollbackEvidence) -> ProductionRollbackEvidence:
+    evidence = ProductionRollbackEvidence.__new__(ProductionRollbackEvidence)
+    evidence.project = source.project
+    evidence.from_deployment_id = source.from_deployment_id
+    evidence.to_deployment_id = source.to_deployment_id
+    evidence.live_deployment_id = source.live_deployment_id
+    evidence.live_deployment_url = source.live_deployment_url
+    return evidence
+
+
 def _curl_script() -> str:
     projection = _jq_projection()
     return f"""
@@ -819,7 +948,7 @@ cat > {REQUEST_PATH}
     printf 'retry = 0\\n'
   fi
   if [ -f /run/mock-ca.pem ]; then printf 'cacert = "/run/mock-ca.pem"\\n'; fi
-  if [ "$method" = PATCH ]; then
+  if [ "$method" = PATCH ] || [ "$method" = POST ]; then
     printf 'header = "Content-Type: application/json"\\n'
     printf 'data-binary = "@{REQUEST_PATH}"\\n'
   fi
@@ -837,22 +966,30 @@ printf '%s\n' '{{"errors":[],"messages":[],"success":false}}'
 
 def _jq_projection() -> str:
     problem = r'{code:.code,message:"Provider error",documentation_url:null,source:null}'
+    deployment = _jq_deployment()
+    result = r'if (.result|type)=="array" then [.result[]|' + deployment + r"] "
+    result += r'elif (.result|type)=="object" and (.result|has("latest_stage")) then (.result|'
+    result += deployment + r") else (.result|" + _jq_project() + r") end"
+    info = r"result_info:(.result_info|{count,page,per_page,total_count,total_pages})"
+    prefix = r"{errors:[.errors[]|" + problem + r"],messages:[.messages[]|" + problem
+    return prefix + r"],success,result:(" + result + r")," + info + r"}"
+
+
+def _jq_project() -> str:
     source = (
         r"{type:.type,config:(.config|{owner,repo_name,production_branch,"
         r"production_deployments_enabled,preview_deployment_setting})}"
     )
     project = r"{id,name,production_branch,domains,source:(.source|if .==null then null else "
-    project += source + r" end)}"
-    metadata = r"{branch,commit_hash,commit_dirty}"
-    trigger = r"{type,metadata:(.metadata|" + metadata + r")}"
+    project += source + r" end),canonical_deployment:(.canonical_deployment|"
+    return project + r"if .==null then null else {id} end)}"
+
+
+def _jq_deployment() -> str:
+    trigger = r"{type,metadata:(.metadata|{branch,commit_hash,commit_dirty})}"
     deployment = r"{id,short_id,url,project_id,project_name,environment,latest_stage:"
     deployment += r"(.latest_stage|{name,status}),deployment_trigger:(.deployment_trigger|"
-    deployment += trigger + r")}"
-    result = r'if (.result|type)=="array" then [.result[]|' + deployment + r"] "
-    result += r"else (.result|" + project + r") end"
-    info = r"result_info:(.result_info|{count,page,per_page,total_count,total_pages})"
-    prefix = r"{errors:[.errors[]|" + problem + r"],messages:[.messages[]|" + problem
-    return prefix + r"],success,result:(" + result + r")," + info + r"}"
+    return deployment + trigger + r")}"
 
 
 def _wrangler_script() -> str:
