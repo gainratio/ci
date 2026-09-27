@@ -360,7 +360,16 @@ def _zip_end_record(path: Path) -> list[object]:
         raw: object = zipfile._EndRecData(stream)  # type: ignore[attr-defined]
     if not isinstance(raw, list):
         raise ProbeError("wheel end record differs")
-    return cast(list[object], raw)
+    return _with_classic_end_location(path, cast(list[object], raw))
+
+
+def _with_classic_end_location(path: Path, record: list[object]) -> list[object]:
+    # For ZIP64 archives zipfile reports the classic end record's offset on CPython <= 3.13.5
+    # but the ZIP64 end record's offset on 3.13.14. The classic record ends the file, so
+    # derive its offset from EOF; the physical-EOF check then verifies its signature there.
+    comment_size = _zip_field(record, ZIP_COMMENT_SIZE_INDEX)
+    location = path.stat().st_size - ZIP_END_RECORD_BYTES - comment_size
+    return [*record[:ZIP_END_LOCATION_INDEX], location, *record[ZIP_END_LOCATION_INDEX + 1 :]]
 
 
 def _zip_field(record: list[object], index: int) -> int:

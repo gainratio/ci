@@ -5,15 +5,18 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import dataclass
 from typing import Final, Protocol
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from .models import (
+    DEPLOYMENT_ID_PATTERN,
     ApiProblem,
     AttemptIdentity,
     CreatedDeployment,
+    DeploymentResponse,
     DeploymentsResponse,
     GitHubEvidence,
     ListedPagesDeployment,
@@ -22,6 +25,7 @@ from .models import (
     PagesTarget,
     ProjectResponse,
     ProviderDeploymentEvidence,
+    RollbackEvidence,
 )
 
 API_ORIGIN: Final = "https://api.cloudflare.com/client/v4"
@@ -31,6 +35,8 @@ ACCOUNT_REF_PATTERN: Final = re.compile(r"[A-Za-z0-9]{1,32}")
 CONTROL_PATTERN: Final = re.compile(r"[\x00-\x1f\x7f]+")
 BEARER_PATTERN: Final = re.compile(r"(?i)bearer\s+\S+")
 JSON_ADAPTER: Final[TypeAdapter[JsonValue]] = TypeAdapter(JsonValue)
+ROLLBACK_DELAYS: Final = (1, 2, 4, 8)
+ROLLBACK_DEADLINE_SECONDS: Final = 60
 
 
 class CloudflareError(RuntimeError):
@@ -59,6 +65,27 @@ class PagesOperations[ArtifactT](Protocol):
     async def upload(self, artifact: ArtifactT, source_sha: str) -> CreatedDeployment: ...
 
     async def sleep(self, seconds: int) -> None: ...
+
+
+class RollbackOperations(Protocol):
+    """Read-and-rollback provider operations for one Pages project."""
+
+    async def get_project(self) -> str: ...
+
+    async def get_deployments(self) -> str: ...
+
+    async def rollback(self, deployment_id: str) -> str: ...
+
+    async def sleep(self, seconds: int) -> None: ...
+
+
+@dataclass(frozen=True)
+class ProductionState:
+    """The bound project, its live deployment id, and recent production history."""
+
+    project: PagesProject
+    live_id: str
+    history: tuple[ListedPagesDeployment, ...]
 
 
 def project_path(account_ref: str, target: PagesTarget) -> str:
@@ -381,13 +408,13 @@ def _deployment_identity(deployment: PagesDeployment, target: PagesTarget) -> tu
         deployment.deployment_trigger.type,
         deployment.project_id,
         metadata.commit_dirty,
-        _valid_deployment_url(deployment.url, target, deployment.short_id),
+        _valid_deployment_url(deployment.url, target.project, deployment.short_id),
     )
 
 
-def _valid_deployment_url(value: str, target: PagesTarget, short_id: str) -> bool:
+def _valid_deployment_url(value: str, project: str, short_id: str) -> bool:
     parsed = urlsplit(value)
-    hostname = f"{short_id}.{target.project}.pages.dev"
+    hostname = f"{short_id}.{project}.pages.dev"
     identity = (
         parsed.scheme,
         parsed.hostname,
@@ -570,3 +597,136 @@ def _model[ModelT: BaseModel](model: type[ModelT], payload: dict[str, JsonValue]
         return model.model_validate_json(json.dumps(payload))
     except (ValidationError, ValueError, TypeError):
         raise CloudflarePolicyError("Cloudflare response schema mismatch") from None
+
+
+def parse_live_deployment_id(raw: str) -> str | None:
+    """Return the project's canonical (currently served) production deployment id."""
+    parse_project_response(raw)
+    result = _object(_required(_json_object(raw), "result"))
+    live = _required(result, "canonical_deployment")
+    if live is None:
+        return None
+    value = _required(_object(live), "id")
+    if not isinstance(value, str) or DEPLOYMENT_ID_PATTERN.fullmatch(value) is None:
+        raise CloudflarePolicyError("Cloudflare response schema mismatch")
+    return value
+
+
+def parse_deployment_response(raw: str) -> ListedPagesDeployment:
+    """Parse a strict projection of one documented deployment response."""
+    payload = _json_object(raw)
+    fields = _response_fields(payload)
+    if fields["success"] is not True:
+        raise CloudflareApiError(provider_error_message(raw))
+    projected = fields | {"result": _deployment_result(_required(payload, "result"))}
+    response = _model(DeploymentResponse, projected)
+    _require_success(response.success, response.errors)
+    return response.result
+
+
+async def live_production_deployment(
+    operations: RollbackOperations, project: str
+) -> ListedPagesDeployment:
+    """Read-only: the deployment production serves now, to record as a rollback target."""
+    state = await read_production_state(operations, project)
+    return _history_row(state.history, state.live_id)
+
+
+async def rollback_production(
+    operations: RollbackOperations, project: str, deployment_id: str | None
+) -> RollbackEvidence:
+    """Roll production back to one eligible deployment and verify it is served."""
+    state = await read_production_state(operations, project)
+    target = _rollback_target(state, deployment_id)
+    response = parse_deployment_response(await operations.rollback(target.id))
+    if response.id != target.id:
+        raise CloudflarePolicyError("Cloudflare rollback response identity differs")
+    live_id = await _await_live(operations, target.id)
+    return RollbackEvidence(project, state.live_id, target.id, live_id, target.url)
+
+
+async def read_production_state(operations: RollbackOperations, project: str) -> ProductionState:
+    """Read the bound project, its live deployment, and the recent production page."""
+    raw = await operations.get_project()
+    pages = parse_project_response(raw)
+    if pages.name != project:
+        raise CloudflarePolicyError("Cloudflare project binding differs")
+    live_id = parse_live_deployment_id(raw)
+    if live_id is None:
+        raise CloudflarePolicyError("Cloudflare project has no live production deployment")
+    deployments = parse_deployments_response(await operations.get_deployments())
+    _require_pagination(deployments)
+    return ProductionState(pages, live_id, deployments.result)
+
+
+def _rollback_target(state: ProductionState, deployment_id: str | None) -> ListedPagesDeployment:
+    if deployment_id is None:
+        return _previous_successful(state)
+    target = _history_row(state.history, deployment_id)
+    if target.id == state.live_id:
+        raise CloudflarePolicyError("Rollback target is already live; refusing a no-op rollback")
+    _require_rollback_target(target, state.project)
+    return target
+
+
+def _previous_successful(state: ProductionState) -> ListedPagesDeployment:
+    live = _history_row(state.history, state.live_id)
+    older = state.history[state.history.index(live) + 1 :]
+    for row in older:
+        if _rollback_eligible(row, state.project):
+            return row
+    raise CloudflarePolicyError("Cloudflare has no previous successful production deployment")
+
+
+def _history_row(
+    history: tuple[ListedPagesDeployment, ...], deployment_id: str
+) -> ListedPagesDeployment:
+    for row in history:
+        if row.id == deployment_id:
+            return row
+    raise CloudflarePolicyError("Cloudflare deployment is not in recent production history")
+
+
+def _rollback_eligible(row: ListedPagesDeployment, project: PagesProject) -> bool:
+    try:
+        _require_rollback_target(row, project)
+    except CloudflarePolicyError:
+        return False
+    return True
+
+
+def _require_rollback_target(row: ListedPagesDeployment, project: PagesProject) -> None:
+    if row.environment != "production":
+        raise CloudflarePolicyError("Rollback target is not a production deployment")
+    if (row.latest_stage.name, row.latest_stage.status) != ("deploy", "success"):
+        raise CloudflarePolicyError("Rollback target is not a successful deployment")
+    identity = (row.project_name, row.project_id)
+    url_valid = _valid_deployment_url(row.url, project.name, row.short_id)
+    if identity != (project.name, project.id) or not url_valid:
+        raise CloudflarePolicyError("Cloudflare deployment identity differs")
+
+
+async def _await_live(operations: RollbackOperations, expected: str) -> str:
+    try:
+        async with asyncio.timeout(ROLLBACK_DEADLINE_SECONDS):
+            return await _bounded_live(operations, expected)
+    except TimeoutError:
+        raise _not_serving() from None
+
+
+async def _bounded_live(operations: RollbackOperations, expected: str) -> str:
+    for delay in ROLLBACK_DELAYS:
+        if await _live_id(operations) == expected:
+            return expected
+        await operations.sleep(delay)
+    if await _live_id(operations) == expected:
+        return expected
+    raise _not_serving()
+
+
+async def _live_id(operations: RollbackOperations) -> str | None:
+    return parse_live_deployment_id(await operations.get_project())
+
+
+def _not_serving() -> CloudflarePolicyError:
+    return CloudflarePolicyError("Cloudflare production does not serve the rollback target")

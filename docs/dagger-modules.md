@@ -335,6 +335,72 @@ request and Wrangler boundaries without access to Cloudflare and cannot mutate C
 cross-language fixtures also tamper with an envelope and prove rejection occurs before GitHub or
 Cloudflare transport.
 
+## Roll back after a failed live smoke check
+
+**TL;DR:** record what production serves before you deploy. If the post-deploy smoke check fails,
+call `rollback` with that ID, then fail the job anyway. Production recovers, and the red run still
+tells you the release was bad.
+
+Two module functions cover this. Both take the same typed credentials as `deploy`:
+
+| Function | Writes? | Returns |
+| --- | --- | --- |
+| `previous-production-deployment(cloudflare-api-token, cloudflare-account-id, project)` | No | `project`, `deployment-id`, `deployment-url` of the deployment production serves **now** |
+| `rollback(cloudflare-api-token, cloudflare-account-id, project, deployment-id="")` | One `POST .../deployments/{id}/rollback` | `project`, `from-deployment-id`, `to-deployment-id`, `live-deployment-id`, `live-deployment-url` |
+
+`previous-production-deployment` is "previous" from the point of view of the deploy you are about
+to run: call it before `deploy`, and the ID it returns is what `rollback` should restore. With no
+`deployment-id`, `rollback` picks the newest successful production deployment older than the one
+live now.
+
+`rollback` fails closed. It refuses, before any write, when:
+
+- the project has no live production deployment, or the target is not in the 10 most recent
+  production deployments;
+- the target is a preview deployment, is not a successful `deploy` stage, or belongs to another
+  project;
+- the target is already live (a no-op must be explicit, so this raises instead of passing);
+- no `deployment-id` is given and there is no older successful production deployment.
+
+After the POST it requires the response to name the target, then re-reads the project until its
+live (`canonical_deployment`) ID equals the target, with 1, 2, 4, 8 second delays under a 60-second
+deadline. If production never serves the target, it raises. A Cloudflare 4xx or 5xx raises a
+sanitized `CloudflareApiError`, and the POST is never retried.
+
+Wire it in the consumer's Dagger release function:
+
+```python
+pages = dag.cloudflare_pages()
+before = pages.previous_production_deployment(
+    cloudflare_api_token=cloudflare_api_token,
+    cloudflare_account_id=cloudflare_account_id,
+    project=PROJECT,
+)
+target = await before.deployment_id()  # 1. record the rollback target
+
+evidence = pages.deploy(...)  # 2. deploy exactly as above
+deployed = await evidence.deployment_id()
+
+if not await live_smoke_passes(LIVE_URL):  # 3. the consumer's own smoke check
+    rolled = pages.rollback(  # 4. restore the recorded target
+        cloudflare_api_token=cloudflare_api_token,
+        cloudflare_account_id=cloudflare_account_id,
+        project=PROJECT,
+        deployment_id=target,
+    )
+    live = await rolled.live_deployment_id()
+    # 5. fail the job: the release was bad even though production recovered
+    raise RuntimeError(f"live smoke failed for {deployed}; production rolled back to {live}")
+```
+
+Record the target before `deploy`, not after: once the new deployment is live, "the one before it"
+is only a guess. If `rollback` itself raises, the job must still fail. Production then needs a
+human, and the error names the reason.
+
+What the module does not prove: it checks the rollback through the Cloudflare API (the project's
+live deployment ID), the same way `deploy` checks convergence. It does not fetch the custom
+domain. The consumer's smoke check should run again after a rollback if it needs that proof.
+
 ## Composition proofs
 
 Warm proof from a repository checkout:
