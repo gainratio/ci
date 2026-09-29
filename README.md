@@ -1,173 +1,159 @@
 # hseshadr/ci
 
-**TL;DR:** GitHub delivers events; Dagger owns execution. This repository contains the
-fleet policy used to prove that all eight repositories follow that boundary, plus typed
-reusable Dagger modules for repository safety and Cloudflare Pages delivery. It does not
-publish reusable workflows, composite actions, or copyable CI templates.
+The shared CI code for Harish Seshadri's own repositories: three Dagger modules they install, and a daily check that each repo still runs its CI the same way.
 
-A **Dagger lego** is a typed reusable Dagger module installed at an immutable commit SHA.
-The exact commit makes the shared behavior reviewable and prevents a consumer from changing
-when central `main` moves.
+**Try it without cloning:** `dagger -m github.com/hseshadr/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions`
 
-## Run it now
+[Dagger](https://dagger.io) runs CI steps as code inside containers, so the same steps run on
+a laptop and in GitHub Actions. Harish's projects (almamesh, aml-filter, assay, edge-proc,
+edge-reco and others) all need the same few things: check the source is safe, build a
+Python package, deploy a static site to Cloudflare Pages. Copying that code into each repo
+means many copies drifting apart. This repo holds one copy, as Dagger modules each repo
+installs at an exact commit.
 
-Prerequisites: Docker, Dagger 0.21.8, and a GitHub token that can read the fleet.
+It also watches the other repos. Once a day it reads the `main` branch of each repo on its
+list from GitHub, and fails if a workflow runs anything outside Dagger, branch protection
+has drifted, a repo pins a module older than the minimum version allowed, or the latest
+`main` commit is not green. It also fails if a repo installs one of these modules but is
+missing from that list.
 
-```bash
-cd /path/to/ci
-export GITHUB_TOKEN="$(gh auth token)"
-dagger call ci --github-token=env:GITHUB_TOKEN
-dagger call fleet --github-token=env:GITHUB_TOKEN --include-central
+**Technical docs:** [Architecture](docs/ARCHITECTURE.md) · [Getting started](docs/GETTING_STARTED.md) · [Using the modules](docs/dagger-modules.md)
+
+## How a repo uses it
+
+A repo adds a module to its own `dagger.json`, pinned to one commit of this repo. This is
+aml-filter's, as it is today:
+
+```json
+"dependencies": [
+  {
+    "name": "cloudflare-pages",
+    "source": "github.com/hseshadr/ci/modules/cloudflare-pages@dd19871486588b1582e432b7bc1f2cfffb296340",
+    "pin": "dd19871486588b1582e432b7bc1f2cfffb296340"
+  },
+  {
+    "name": "foundation",
+    "source": "github.com/hseshadr/ci/modules/portfolio-foundation@dd19871486588b1582e432b7bc1f2cfffb296340",
+    "pin": "dd19871486588b1582e432b7bc1f2cfffb296340"
+  }
+]
 ```
 
-The first command runs central quality and security checks. The second reads exact
-`main` state from GitHub for:
+Its own Dagger code then calls the modules like any other function, for example
+`dag.foundation().guard(...)` before a build and `dag.cloudflare_pages().deploy(...)` to
+ship the site. Its GitHub workflow stays tiny: check out the code, then call Dagger.
 
-- `agentic-context-service`
-- `agentic-saga`
-- `almamesh`
-- `aml-filter`
-- `assay`
-- `edge-proc`
-- `edge-reco`
-- `edgeproc-core`
-- `privacy-core`
-- `ci`
+The three modules:
 
-It also fails if any other `hseshadr` repository pins a `github.com/hseshadr/ci` module but
-is missing from that list. Any inaccessible or incomplete evidence is an error. A scan that inspected nothing
-cannot report success.
-
-## Reuse the Dagger legos
-
-The shared modules are:
-
-- `portfolio-foundation`: exact source identity, full-history repository guard, deterministic
-  artifact envelopes, envelope verification, and exact-current-`main` GitHub evidence;
-- `cloudflare-pages`: fail-closed Pages preflight, one pinned Wrangler direct upload,
-  deployment/live convergence bound to the created deployment ID, and an opt-in compiler for
-  authenticated Pages Functions sources that stage validated advanced-mode module trees.
-- `python-package`: frozen dependency audit, non-root pure-Python wheel and sdist build,
-  metadata-derived tag verification, and a Foundation envelope for a separate source-free
-  official PyPA publisher job. The module never publishes to a registry.
-
-Start with the [exact-SHA consumer quickstart](docs/dagger-modules.md#quickstart). It captures
-the central `main` SHA, validates all 40 lowercase hexadecimal characters, and commits that
-literal dependency. The guide also includes a realistic Python composition, typed secret and
-GitHub Environment rules, Python/TypeScript fixture proofs, and cold-engine verification.
-
-The modules and their cross-language composition fixtures are implemented in this repository.
-The guarded central merge establishes the remotely installable SHA. EdgeReco adoption and its
-production canary are separate pending rollout steps; this change does not claim a production
-deployment or fleet-wide module adoption.
-
-## Architecture
-
-Explore the [interactive runtime map](docs/architecture/index.html).
-
-## Execution model
-
-Only four workflows remain:
-
-| Workflow | Event ingress | Dagger function |
+| Module | What it does | Used by |
 |---|---|---|
-| `dagger.yml` | pull request, push to `main`, manual | `ci` |
-| `consumer-drift.yml` | push to `main`, daily, manual | `fleet` |
-| `dagger-security.yml` | weekly, manual | `security` |
-| `module-canary.yml` | weekly, manual | `module-fixtures` |
+| `portfolio-foundation` | Ties a build to one exact commit, runs secret and workflow scans over the full Git history, and wraps build output with a record of where it came from. | all nine repos |
+| `cloudflare-pages` | Deploys a built site to Cloudflare Pages once, then checks the live site is serving that exact deployment. | almamesh, aml-filter, edge-reco |
+| `python-package` | Audits dependencies, builds the wheel and sdist, and checks the version matches the tag. It does not upload to PyPI; a separate job does that with PyPI's official action. | edge-proc, edgeproc-core, agentic-context-service, agentic-saga |
 
-Each job has exactly two pinned actions:
+Upgrading is a pull request in the consumer that changes the commit in both `source` and
+`pin`. Nothing changes for a consumer when this repo's `main` moves.
 
-1. `actions/checkout` with `persist-credentials: false`
-2. `dagger/dagger-for-github` pinned to a full commit SHA and Dagger 0.21.8
+## Try it
 
-The module receives source through an explicit typed `dagger.Workspace` and stores an
-explicit `dagger.Directory`. Credentials cross public Dagger functions as
-`dagger.Secret`. Generated SDK bytes are mounted separately as toolchain data, so they
-cannot silently expand the caller-selected source snapshot.
+You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 
-## What the central gate proves
+1. List what the foundation module offers, straight from GitHub (about 15 seconds):
 
-`dagger call ci` runs:
+   ```bash
+   dagger -m github.com/hseshadr/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions
+   ```
 
-- Ruff formatting and linting
-- strict mypy
-- Xenon Grade A complexity
-- pytest with at least 90% core coverage
-- locked dependency audit
-- actionlint
-- Zizmor, failing on medium or high findings
-- Gitleaks over both the exact source snapshot and complete Git history
+   ```text
+   Name              Description
+   envelope          Wrap a typed artifact with deterministic evidence.
+   green-main        Resolve exact-green main evidence using a typed secret.
+   guard             Apply repository security checks to a bound source.
+   source            Bind a supplied workspace to a repository identity.
+   verify-envelope   Revalidate and return only a closed envelope's artifact subtree.
+   ```
 
-The same graph runs locally and in GitHub. Hosted calls bind full-history scanning to
-`${{ github.sha }}`.
+2. Ask it whether a repo's `main` is green right now. This is the same call aml-filter
+   makes before it deploys:
 
-## What fleet policy proves
+   ```bash
+   export GITHUB_TOKEN="$(gh auth token)"
+   dagger -m github.com/hseshadr/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e \
+     call green-main --github-token=env:GITHUB_TOKEN --repository=hseshadr/aml-filter serialization
+   ```
 
-For every exact consumer `main`, the scanner requires:
+   Real output from 25 Sep 2026, trimmed:
 
-- every repository-authored workflow job is thin pinned Dagger ingress;
-- source is an explicit typed `Directory` or `Workspace`;
-- Dagger-exposed credential arguments are typed `Secret`;
-- branch protection is strict and requires only `Dagger`, bound to GitHub Actions app
-  ID `15368`;
-- the required `Dagger` check succeeded on the exact current `main` SHA;
-- managed CodeQL default setup is disabled;
-- no independent execution app controls the build or deploy path;
-- no live workflow executes a retired `hseshadr/ci` reusable control.
-- every pinned central module is on `hseshadr/ci` `main` and at or after its reviewed
-  required-minimum floor ([details](docs/dagger-modules.md#required-minimum-pins)).
+   ```json
+   {"app_id":15368,"branch":"main","check_name":"Dagger",
+    "commit_sha":"4392391bde505a8367fea87723e4ee8ef7bc4895",
+    "repository":"hseshadr/aml-filter","workflow_path":".github/workflows/dagger.yml",
+    "workflow_run_id":"36177431244", ...}
+   ```
 
-GitGuardian is allowed only as a non-required advisory observer.
+   `commit_sha` is aml-filter's current `main`, and the `Dagger` check passed on it. If the
+   check had not passed, the call would fail instead of returning.
 
-### Approved transport exceptions
+3. Run this repo's own checks from a clone (about 8 minutes):
 
-The policy recognizes only two non-Dagger transports around a release candidate:
+   ```bash
+   git clone https://github.com/hseshadr/ci && cd ci
+   dagger call ci --github-token=env:GITHUB_TOKEN
+   ```
 
-- a pinned `upload-artifact` step after a successful unprivileged Dagger candidate;
-- a source-free privileged job that downloads that exact run/SHA artifact, then either
-  invokes the official PyPI OIDC action with attestations or an exact-SHA remote Dagger
-  npm publisher with typed GitHub OIDC URL and token inputs.
+   Success ends with `central Dagger gate passed`.
 
-Publisher bridges reject checkout, setup, install, build, test, free-form shell, mutable
-references, excess permissions, wrong artifact identity, and missing provenance.
+## How it works
 
-This repository does not publish packages and its CI never dispatches a registry
-mutation.
+Every workflow in this repo and in the consumer repos does two things: check out the code,
+and call one Dagger function. All the real work happens in Dagger. `dagger call ci` runs
+linting, strict type checks, tests with a 90% coverage floor, a dependency audit, workflow
+security scans, and a secret scan over the full Git history. It also builds two tiny consumer
+modules, one in Python and one in TypeScript, to prove the shared modules install and run
+from both. `dagger call fleet` reads every consumer repo's `main` through the GitHub API and
+applies the rules in `.dagger/src/ci/fleet_policy.py`. If any repo cannot be read, that is a
+failure, not a skip.
 
-## Fleet token
+## What it does not do
 
-`CONSUMER_DRIFT_TOKEN` must be able to read all eight repositories. The authoritative
-reader needs:
-
-- Contents: read
-- Administration: read
-- Checks: read
-- Pull requests: read
-
-Administration read is required for effective branch protection and CodeQL default-setup
-metadata. Checks read is required for exact-SHA app-bound integration evidence. The
-scanner fails closed with a permission-specific message when either is unavailable.
+- **It is for Harish's repos.** The modules assume his setup: GitHub, Cloudflare Pages,
+  PyPI, Dagger 0.21.8. You can read and borrow from them, but there is no support promise.
+- **No reusable GitHub workflows or composite actions.** The old ones were removed; they
+  are in Git history and old tags only.
+- **It never publishes anything.** No package, tag or registry upload comes from this repo.
+  `python-package` builds a package; publishing is a separate job in the consumer.
+- **No automatic upgrades.** Consumers stay on their pinned commit until someone opens a PR.
+- **Dependabot PRs are never auto-merged.**
 
 ## Develop
 
-Use TDD and run the same enforced gate:
+The quick local loop (about 1 minute once Dagger has generated the SDK):
 
 ```bash
+dagger develop
 uv run --directory .dagger poe gate
-uv run --directory .dagger poe audit
-export GITHUB_TOKEN="$(gh auth token)"
-dagger call ci --github-token=env:GITHUB_TOKEN
-dagger call fleet --github-token=env:GITHUB_TOKEN
 ```
 
-Core policy lives in `.dagger/src/ci/fleet_policy.py`; GitHub's typed evidence adapter
-lives in `.dagger/src/ci/github_fleet.py`. Behavioral tests live in `.dagger/tests/`.
+The full check, the same one CI runs, is `dagger call ci --github-token=env:GITHUB_TOKEN`.
+On a branch, push first and add `--commit-sha=$(git rev-parse HEAD)`.
+Each module under `modules/` has its own `poe gate` too. See
+[Getting started](docs/GETTING_STARTED.md) for versions, the code map, and a worked first
+change.
 
-## Scope
+## More detail
 
-This is a control-plane repository, not a template catalog. Consumer-specific application builds
-stay local; consumers compose Foundation, Pages, and the closed Python package candidate Lego
-instead of copying shared trust mechanics. Privileged publisher jobs stay source-free and use
-official registry actions outside Dagger. Dependabot may propose dependency updates, but its pull
-requests are never auto-merged.
+- [Getting started](docs/GETTING_STARTED.md): set up, run the checks, make a first change,
+  open a PR.
+- [Architecture](docs/ARCHITECTURE.md): the four workflows, exactly what `ci` and `fleet`
+  check, the allowed publishing exceptions, and the token `fleet` needs.
+- [Interactive runtime map](docs/architecture/index.html).
+- [Using the modules](docs/dagger-modules.md): installing at an exact commit, a full
+  consumer example, secrets, Pages safety and rollback.
+- [Design (2026-08-27)](docs/superpowers/specs/2026-08-27-dagger-lego-architecture-design.md)
+  and the [first rollout plan](docs/superpowers/plans/2026-08-27-dagger-lego-edge-reco-canary.md):
+  why the shared modules exist.
+- [CHANGELOG](CHANGELOG.md): what changed, including what was removed.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
