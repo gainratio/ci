@@ -108,6 +108,30 @@ jobs:
           retention-days: 1
 """
 
+# Every publisher must open with the central lineage proof (#49). These bridges used to
+# pass without it; the policy now reports that as `publisher-lineage`.
+LINEAGE_ARGS = (
+    '--github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" '
+    '--head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"'
+)
+
+
+def _lineage_step(function: str) -> str:
+    return f"""      - uses: dagger/dagger-for-github@{DAGGER}
+        env:
+          GH_TOKEN: ${{{{ github.token }}}}
+          RUN_ID: ${{{{ github.event.workflow_run.id }}}}
+          HEAD_SHA: {HEAD_SHA}
+        with:
+          version: "0.21.8"
+          verb: call
+          module: github.com/hseshadr/ci/modules/portfolio-foundation@{"e" * 40}
+          args: {function}
+"""
+
+
+PYPI_LINEAGE = _lineage_step(f"release-lineage {LINEAGE_ARGS}")
+NPM_LINEAGE = _lineage_step(f"release-provenance {LINEAGE_ARGS} export --path=github-context.json")
 PYPI_BRIDGE = f"""
 name: Publish trusted artifacts
 on:
@@ -127,7 +151,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@{DOWNLOAD}
+{PYPI_LINEAGE}      - uses: actions/download-artifact@{DOWNLOAD}
         with:
           name: example-${{{{ github.event.workflow_run.head_sha }}}}
           path: release
@@ -159,7 +183,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@{DOWNLOAD}
+{NPM_LINEAGE}      - uses: actions/download-artifact@{DOWNLOAD}
         with:
           name: example-{HEAD_SHA}
           path: release

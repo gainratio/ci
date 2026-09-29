@@ -174,6 +174,17 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # Required first step: prove the candidate run came from main (see Publisher lineage).
+      - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        with:
+          version: "0.21.8"
+          verb: call
+          module: github.com/hseshadr/ci/modules/portfolio-foundation@3de1c4bef2558fd6610b6dda1504b657de7a954d
+          args: release-lineage --github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" --head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: python-candidate-${{ github.event.workflow_run.head_sha }}-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
@@ -529,8 +540,10 @@ the candidate's SHA). The steps are then lineage → download → publish, with 
 `${{ github.head_ref }}` there. Pass the value through `env:` and quote it: `--tag="$TAG"`.
 `module` is exempt because the action passes it as the `INPUT_MODULE` environment variable.
 
-Not yet enforced: the policy accepts the lineage step but does not require it, so a
-publisher without it still passes. Requiring it waits until every publisher has migrated.
+**Required.** Every publisher job (one that downloads a candidate or mints an OIDC token) must
+open with this step. A publisher without it, or with it anywhere but first, is a
+`publisher-lineage` finding (`central lineage step required first`). Lineage has to run
+before the candidate bytes are downloaded, so nothing is trusted before the proof.
 
 ## Release status
 

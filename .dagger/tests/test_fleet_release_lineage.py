@@ -241,3 +241,54 @@ def test_should_reject_a_shell_lineage_step_as_before() -> None:
 """
     # Then shell stays forbidden: the module function is the only compliant shape
     assert "shell-step" in _codes(HEADER + shell + DOWNLOAD_STEP + PYPI_STEP)
+
+
+def _findings(text: str) -> tuple[tuple[str, str], ...]:
+    source = SourceFile(path=".github/workflows/publish.yml", text=text)
+    return tuple(
+        (item.code, item.message) for item in validate_workflow(source, "v0.21.8", "example")
+    )
+
+
+@pytest.mark.parametrize(
+    "transport",
+    [DOWNLOAD_STEP + PYPI_STEP, DOWNLOAD_STEP + NPM_PUBLISHER],
+    ids=["pypi", "npm"],
+)
+def test_should_require_the_central_lineage_step_in_every_publisher(transport: str) -> None:
+    # Given a publisher that is otherwise compliant but never proves lineage
+    workflow = HEADER + transport
+
+    # When the fleet policy validates it
+    findings = _findings(workflow)
+
+    # Then the missing lineage proof is a finding, and the only one
+    assert findings == (("publisher-lineage", "central lineage step required first"),)
+
+
+def test_should_require_lineage_before_the_candidate_is_downloaded() -> None:
+    # Given the exact lineage call, but after the candidate bytes are already downloaded
+    workflow = HEADER + DOWNLOAD_STEP + _lineage(LINEAGE_CALL) + PYPI_STEP
+
+    # When the fleet policy validates it
+    findings = _findings(workflow)
+
+    # Then lineage counts only as the first step
+    assert ("publisher-lineage", "central lineage step required first") in findings
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        HEADER + _lineage(LINEAGE_CALL) + DOWNLOAD_STEP + PYPI_STEP,
+        HEADER + _lineage(PROVENANCE_CALL) + DOWNLOAD_STEP + NPM_PUBLISHER,
+    ],
+    ids=["pypi", "npm"],
+)
+def test_should_accept_a_publisher_that_proves_lineage_first(workflow: str) -> None:
+    # Given a reviewed lineage-first publisher shape
+    # When the fleet policy validates it
+    findings = _findings(workflow)
+
+    # Then it carries no finding at all
+    assert findings == ()

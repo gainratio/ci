@@ -1208,7 +1208,7 @@ def validate_publisher(path: str, job: WorkflowJob, repository: str) -> tuple[Po
     findings: list[PolicyFinding] = []
     findings.extend(validate_publisher_permissions(path, job))
     findings.extend(validate_publisher_source(path, job.steps))
-    findings.extend(() if lineage is None else validate_lineage(path, lineage))
+    findings.extend(validate_required_lineage(path, lineage))
     findings.extend(validate_download(path, steps))
     names = tuple(map(action_name, steps))
     if PYPI_ACTION in names:
@@ -1231,6 +1231,13 @@ def is_lineage_step(step: WorkflowStep) -> bool:
     """Return whether a step loads the central lineage module."""
     module = scalar_text(step.with_.get("module"))
     return action_name(step) == DAGGER_ACTION and module.startswith(LINEAGE_MODULE_PREFIX)
+
+
+def validate_required_lineage(path: str, step: WorkflowStep | None) -> tuple[PolicyFinding, ...]:
+    """Require every publisher to open with the exact central lineage proof."""
+    if step is None:
+        return (finding("publisher-lineage", path, "central lineage step required first"),)
+    return validate_lineage(path, step)
 
 
 def validate_lineage(path: str, step: WorkflowStep) -> tuple[PolicyFinding, ...]:

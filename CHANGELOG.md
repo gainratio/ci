@@ -4,6 +4,9 @@
 
 ### Added
 
+- Publisher lineage is now required: every publisher job must open with the central
+  `release-lineage` / `release-provenance` step. A publisher without it, or with it after the
+  download, is a `publisher-lineage` finding (`central lineage step required first`).
 - Publisher lineage as a module function (hseshadr/ci#49): `portfolio-foundation` gains
   `release-lineage` and `release-provenance`. They fail unless the candidate run is a
   successful `release-candidate.yml` dispatch for exactly the expected SHA and `main`
