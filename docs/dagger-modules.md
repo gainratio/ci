@@ -479,6 +479,59 @@ missing from the list. The scan then fails.
 - A repository whose evidence cannot be read (for example, `main` has no branch protection)
   gets an `evidence-unreadable` finding. The scan keeps going and still fails.
 
+## Publisher lineage
+
+**TL;DR:** before a `workflow_run` publisher trusts a candidate artifact, it calls
+`portfolio-foundation`'s `release-lineage` (PyPI) or `release-provenance` (npm) at a literal
+`hseshadr/ci` SHA. The call fails unless GitHub's own run records show the candidate came
+from `main`.
+
+**Why:** the publisher's `head_branch == default_branch` gate also passes for a
+`workflow_dispatch` on a *tag* named `main`. That tag's commit, and the
+`release-candidate.yml` it runs, are whatever the tagger wrote. Without a lineage check,
+the `main` publisher would publish those bytes over OIDC (hseshadr/ci#49).
+
+The function reads the triggering run and the running publish run, then requires all of:
+
+- the candidate run is a successful `workflow_dispatch` of `release-candidate.yml` in this
+  repository, for exactly `HEAD_SHA`;
+- the publish run is this repository's in-progress `publish.yml` `workflow_run` on `main`;
+- `compare/HEAD_SHA...publish_sha` and `compare/publish_sha...branches/main` are `ahead` or
+  `identical`. The branch SHA comes from the `branches/main` endpoint, so a tag named `main`
+  cannot stand in for the branch.
+
+`release-provenance` then returns `github-context.json`, the GitHub Actions context npm writes
+into its SLSA provenance. It is built from the publish run record, not from caller text.
+
+The fleet policy accepts exactly this leading step and nothing weaker (`publisher-lineage`):
+
+```yaml
+      - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        with:
+          version: "0.21.8"
+          verb: call
+          module: github.com/hseshadr/ci/modules/portfolio-foundation@<40-hex ci SHA>
+          args: release-lineage --github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" --head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"
+```
+
+For npm, use `release-provenance` with the same arguments plus
+`export --path=github-context.json`, then load the repository's own publisher at
+`github.com/hseshadr/<repo>@${{ github.sha }}` (the `main` commit the workflow runs on, never
+the candidate's SHA). The steps are then lineage → download → publish, with no `run:` step.
+
+**Expressions in Dagger inputs.** `dagger-for-github` pastes `args`, `call`, `shell`,
+`dagger-flags`, `workdir`, and `cloud-token` into bash. The policy reports
+`dagger-args-expression` for any `${{ inputs.* }}`, `${{ github.event.* }}` or
+`${{ github.head_ref }}` there. Pass the value through `env:` and quote it: `--tag="$TAG"`.
+`module` is exempt because the action passes it as the `INPUT_MODULE` environment variable.
+
+Not yet enforced: the policy accepts the lineage step but does not require it, so a
+publisher without it still passes. Requiring it waits until every publisher has migrated.
+
 ## Release status
 
 Shipped in this central change:

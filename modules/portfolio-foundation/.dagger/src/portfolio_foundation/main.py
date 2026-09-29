@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dagger
-from dagger import function, object_type
+from dagger import dag, function, object_type
 
 from .artifact import (
     envelope_directory,
@@ -14,7 +14,10 @@ from .artifact import (
 from .github import CheckEvidence, resolve_green_main
 from .guard import build_guard
 from .identity import CommitIdentity, FullSha, RepositoryRef
+from .lineage import LineageRequest, release_lineage, release_provenance
 from .source import SourceBinding, bind_dagger_source, dagger_history
+
+PROVENANCE_FILE = "github-context.json"
 
 
 @object_type
@@ -79,6 +82,33 @@ class PortfolioFoundation:
     async def green_main(self, github_token: dagger.Secret, repository: str) -> CheckEvidence:
         """Resolve exact-green main evidence using a typed secret."""
         return await resolve_green_main(github_token, RepositoryRef.parse(repository))
+
+    @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
+    async def release_lineage(
+        self,
+        github_token: dagger.Secret,
+        repository: str,
+        run_id: int,
+        head_sha: str,
+        publish_run_id: int,
+    ) -> str:
+        """Prove a release candidate run was built from main before anything publishes it."""
+        request = LineageRequest.parse(repository, run_id, head_sha, publish_run_id)
+        return await release_lineage(github_token, request)
+
+    @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
+    async def release_provenance(
+        self,
+        github_token: dagger.Secret,
+        repository: str,
+        run_id: int,
+        head_sha: str,
+        publish_run_id: int,
+    ) -> dagger.File:
+        """Prove lineage, then return npm's provenance context for the publish run."""
+        request = LineageRequest.parse(repository, run_id, head_sha, publish_run_id)
+        context = await release_provenance(github_token, request)
+        return dag.directory().with_new_file(PROVENANCE_FILE, context).file(PROVENANCE_FILE)
 
 
 async def _source_binding(

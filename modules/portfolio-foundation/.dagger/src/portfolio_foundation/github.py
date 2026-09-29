@@ -46,6 +46,7 @@ TARGET_PATTERN: Final = re.compile(
     r"|/actions/jobs/[1-9][0-9]*"
     r"|/actions/runs/[1-9][0-9]*"
     r"|/actions/runs/[1-9][0-9]*/attempts/[1-9][0-9]*"
+    r"|/compare/[0-9a-f]{40}\.\.\.[0-9a-f]{40}"
     r")"
 )
 NEXT_LINK_PATTERN: Final = re.compile(r'<([^>]+)>;\s*rel="next"')
@@ -98,7 +99,7 @@ class DuplicateGreenCheckError(GitHubPolicyError):
 
 @dataclass(frozen=True)
 class ApiTarget:
-    """A validated relative path for one of the four read-only GitHub queries."""
+    """A validated relative path for one of the fixed read-only GitHub queries."""
 
     value: str
 

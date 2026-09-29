@@ -111,6 +111,36 @@ REQUIRED_MINIMUM: Final[Mapping[str, str]] = MappingProxyType(
 )
 DESCENDANT_STATUSES: Final = frozenset(("ahead", "identical"))
 APPROVED_PUBLISHER_MODULES: Final = frozenset(("github.com/hseshadr/ci/modules/npm-publisher",))
+# dagger-for-github pastes every `with:` input except `module` (passed as INPUT_MODULE env)
+# into bash, so a caller-controlled expression there is script injection (#49).
+ATTACKER_EXPRESSION: Final = re.compile(
+    r"\$\{\{(?:(?!\}\}).)*?(?<![\w.])"
+    r"(?:inputs\b|github\s*(?:\.\s*|\[\s*['\"])(?:event|head_ref)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
+# The central, literal-SHA-pinned lineage proof a publisher runs before it trusts a
+# candidate (#49). Exact text: a hard-coded run id or SHA would prove a different run.
+LINEAGE_MODULE: Final = re.compile(
+    r"^github\.com/hseshadr/ci/modules/portfolio-foundation@[0-9a-f]{40}$"
+)
+LINEAGE_MODULE_PREFIX: Final = "github.com/hseshadr/ci/modules/portfolio-foundation@"
+LINEAGE_ARGUMENTS: Final = (
+    '--github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" '
+    '--head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"'
+)
+LINEAGE_CALLS: Final = frozenset(
+    (
+        f"release-lineage {LINEAGE_ARGUMENTS}",
+        f"release-provenance {LINEAGE_ARGUMENTS} export --path=github-context.json",
+    )
+)
+LINEAGE_ENV: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "GH_TOKEN": "${{ github.token }}",
+        "RUN_ID": "${{ github.event.workflow_run.id }}",
+        "HEAD_SHA": "${{ github.event.workflow_run.head_sha }}",
+    }
+)
 type Scalar = str | bool | int
 type RemoteIdentity = tuple[str, str, str, str]
 type ByteRange = tuple[int, int]
@@ -992,8 +1022,10 @@ def validate_job(
     path: str, job: WorkflowJob, engine_version: str | None = None, repository: str = ""
 ) -> tuple[PolicyFinding, ...]:
     """Dispatch a job to its only accepted execution shape."""
-    common = validate_steps(path, job.steps) + validate_action_steps(
-        path, job.steps, engine_version
+    common = (
+        validate_steps(path, job.steps)
+        + validate_action_steps(path, job.steps, engine_version)
+        + validate_dagger_expressions(path, job.steps)
     )
     names = tuple(map(action_name, job.steps))
     if UPLOAD_ACTION in names:
@@ -1024,6 +1056,27 @@ def validate_steps(path: str, steps: tuple[WorkflowStep, ...]) -> tuple[PolicyFi
         if step.run is not None:
             findings.append(finding("shell-step", path, "run steps are forbidden"))
     return tuple(findings)
+
+
+def validate_dagger_expressions(
+    path: str, steps: tuple[WorkflowStep, ...]
+) -> tuple[PolicyFinding, ...]:
+    """Reject caller-controlled expressions in any Dagger input pasted into bash."""
+    return tuple(
+        finding("dagger-args-expression", path, f"{key} carries a caller-controlled expression")
+        for step in steps
+        if action_name(step) == DAGGER_ACTION
+        for key in script_inputs_with_expressions(step)
+    )
+
+
+def script_inputs_with_expressions(step: WorkflowStep) -> tuple[str, ...]:
+    """Return every script-pasted input that carries a caller-controlled expression."""
+    return tuple(
+        key
+        for key, value in sorted(step.with_.items())
+        if key != "module" and ATTACKER_EXPRESSION.search(scalar_text(value))
+    )
 
 
 def validate_ingress(
@@ -1151,16 +1204,50 @@ def candidate_identity_is_weak(step: WorkflowStep) -> bool:
 
 def validate_publisher(path: str, job: WorkflowJob, repository: str) -> tuple[PolicyFinding, ...]:
     """Accept only source-free artifact transport into one OIDC publisher."""
+    lineage, steps = split_lineage(job.steps)
     findings: list[PolicyFinding] = []
     findings.extend(validate_publisher_permissions(path, job))
     findings.extend(validate_publisher_source(path, job.steps))
-    findings.extend(validate_download(path, job.steps))
-    names = tuple(map(action_name, job.steps))
+    findings.extend(() if lineage is None else validate_lineage(path, lineage))
+    findings.extend(validate_download(path, steps))
+    names = tuple(map(action_name, steps))
     if PYPI_ACTION in names:
-        findings.extend(validate_pypi(path, job.steps, repository))
+        findings.extend(validate_pypi(path, steps, repository))
     else:
-        findings.extend(validate_npm(path, job.steps, repository))
+        findings.extend(validate_npm(path, steps, repository))
     return tuple(findings)
+
+
+def split_lineage(
+    steps: tuple[WorkflowStep, ...],
+) -> tuple[WorkflowStep | None, tuple[WorkflowStep, ...]]:
+    """Separate a leading central lineage proof from the publisher transport."""
+    if steps and is_lineage_step(steps[0]):
+        return steps[0], steps[1:]
+    return None, steps
+
+
+def is_lineage_step(step: WorkflowStep) -> bool:
+    """Return whether a step loads the central lineage module."""
+    module = scalar_text(step.with_.get("module"))
+    return action_name(step) == DAGGER_ACTION and module.startswith(LINEAGE_MODULE_PREFIX)
+
+
+def validate_lineage(path: str, step: WorkflowStep) -> tuple[PolicyFinding, ...]:
+    """Require the exact literal-pinned lineage call bound to the triggering run."""
+    environment = {key: scalar_text(value) for key, value in step.env.items()}
+    if lineage_call_is_exact(step) and environment == LINEAGE_ENV:
+        return ()
+    return (finding("publisher-lineage", path, "exact central lineage call required"),)
+
+
+def lineage_call_is_exact(step: WorkflowStep) -> bool:
+    """Return whether the step is the literal-pinned central lineage call."""
+    values = {key: scalar_text(value) for key, value in step.with_.items()}
+    if set(values) != {"version", "verb", "module", "args"}:
+        return False
+    module = LINEAGE_MODULE.fullmatch(values["module"]) is not None
+    return (values["verb"], module, values["args"] in LINEAGE_CALLS) == ("call", True, True)
 
 
 def validate_publisher_permissions(path: str, job: WorkflowJob) -> tuple[PolicyFinding, ...]:
@@ -1282,11 +1369,14 @@ def remote_dagger_module(steps: tuple[WorkflowStep, ...]) -> str:
 
 
 def publisher_module_is_authorized(module: str, repository: str) -> bool:
-    """Accept exact consumer candidates or an approved literal central publisher."""
-    candidate = f"github.com/hseshadr/{repository}@${{{{ github.event.workflow_run.head_sha }}}}"
+    """Accept the consumer at the candidate or main SHA, or an approved central publisher."""
+    own = (
+        f"github.com/hseshadr/{repository}@${{{{ github.event.workflow_run.head_sha }}}}",
+        f"github.com/hseshadr/{repository}@${{{{ github.sha }}}}",
+    )
     base, separator, revision = module.rpartition("@")
     literal = separator == "@" and base in APPROVED_PUBLISHER_MODULES
-    return module == candidate or (literal and re.fullmatch(r"[0-9a-f]{40}", revision) is not None)
+    return module in own or (literal and re.fullmatch(r"[0-9a-f]{40}", revision) is not None)
 
 
 def oidc_arguments_are_typed(step: WorkflowStep) -> bool:

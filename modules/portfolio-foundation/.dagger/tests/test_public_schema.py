@@ -55,6 +55,28 @@ EXPECTED_PUBLIC_SCHEMA: tuple[PublicSignature, ...] = (
         (("github_token", "dagger.Secret"), ("repository", "str")),
         "CheckEvidence",
     ),
+    (
+        "release_lineage",
+        (
+            ("github_token", "dagger.Secret"),
+            ("repository", "str"),
+            ("run_id", "int"),
+            ("head_sha", "str"),
+            ("publish_run_id", "int"),
+        ),
+        "str",
+    ),
+    (
+        "release_provenance",
+        (
+            ("github_token", "dagger.Secret"),
+            ("repository", "str"),
+            ("run_id", "int"),
+            ("head_sha", "str"),
+            ("publish_run_id", "int"),
+        ),
+        "dagger.File",
+    ),
 )
 
 

@@ -139,8 +139,11 @@ jobs:
           attestations: true
 """
 
+# Event values reach dagger-for-github's bash only as quoted env vars (#49). This fixture
+# used to paste `--expected-sha=${{ github.event.workflow_run.head_sha }}` into args and
+# call it compliant; the policy now reports that as `dagger-args-expression`.
 NPM_ARGS = (
-    f"publish-npm --candidate=candidate --expected-sha={HEAD_SHA} "
+    'publish-npm --candidate=candidate --expected-sha="$HEAD_SHA" '
     "--oidc-url=env:ACTIONS_ID_TOKEN_REQUEST_URL "
     "--oidc-token=env:ACTIONS_ID_TOKEN_REQUEST_TOKEN"
 )
@@ -163,6 +166,8 @@ jobs:
           github-token: ${{{{ github.token }}}}
           run-id: ${{{{ github.event.workflow_run.id }}}}
       - uses: dagger/dagger-for-github@{DAGGER}
+        env:
+          HEAD_SHA: {HEAD_SHA}
         with:
           version: "0.21.8"
           verb: call
@@ -511,7 +516,7 @@ def test_should_accept_exact_remote_dagger_plan_before_official_pypi() -> None:
           version: "0.21.8"
           verb: call
           module: github.com/hseshadr/example@{HEAD_SHA}
-          args: pypi-required --candidate=release --expected-sha={HEAD_SHA}
+          args: pypi-required --candidate=release --expected-sha="$HEAD_SHA"
 """
     bridge = PYPI_BRIDGE.replace(
         f"      - uses: pypa/gh-action-pypi-publish@{PYPI}",
