@@ -253,6 +253,21 @@ def test_should_observe_bounded_forced_zip64_wheel(
     assert observed[0].member_count == 4
 
 
+def test_should_reject_bytes_after_forced_zip64_wheel_end_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Given a valid forced-ZIP64 wheel followed by bytes outside its framing
+    monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 1)
+    _write_forced_zip64_wheel(tmp_path)
+    _write_sdist(tmp_path, member_count=4)
+    target = tmp_path / "probe_package-1.2.3-py3-none-any.whl"
+    target.write_bytes(target.read_bytes() + b"MZ" + bytes(62))
+
+    # When / Then trailing bytes still fail closed
+    with pytest.raises(ProbeError, match=r"physical EOF|end record"):
+        inspect_directory(tmp_path)
+
+
 def test_should_observe_bounded_data_descriptor_wheel(tmp_path: Path) -> None:
     # Given a valid wheel written to an unseekable stream with data descriptors
     _write_data_descriptor_wheel(tmp_path)

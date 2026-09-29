@@ -266,6 +266,7 @@ def test_should_run_public_ci_in_protected_order(monkeypatch: pytest.MonkeyPatch
     central = Ci.__new__(Ci)
     monkeypatch.setattr(central, "_quality", lambda: FakeSync(events, "quality"))
     monkeypatch.setattr(central, "_security", _security_recorder(events))
+    monkeypatch.setattr(central, "_module_gates", _gates_recorder(events))
     monkeypatch.setattr(central, "_module_fixtures", _fixture_recorder(events))
 
     # When
@@ -273,7 +274,7 @@ def test_should_run_public_ci_in_protected_order(monkeypatch: pytest.MonkeyPatch
 
     # Then
     assert result == "central Dagger gate passed"
-    assert events == ["quality", "security:" + "a" * 40, "module-fixtures"]
+    assert events == ["quality", "module-gates", "security:" + "a" * 40, "module-fixtures"]
 
 
 def test_should_run_public_security_without_quality(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -419,6 +420,13 @@ def test_should_preserve_main_resolution_when_commit_is_omitted(
 def _security_recorder(events: list[str]) -> Callable[[str, dagger.Secret], Awaitable[None]]:
     async def record(commit_sha: str, _: dagger.Secret) -> None:
         events.append("security:" + commit_sha)
+
+    return record
+
+
+def _gates_recorder(events: list[str]) -> Callable[[], Awaitable[None]]:
+    async def record() -> None:
+        events.append("module-gates")
 
     return record
 
