@@ -905,6 +905,50 @@ async def test_should_obtain_exact_green_from_local_foundation(
     assert context.github.commit_sha == FULL_SHA
 
 
+@pytest.mark.asyncio
+async def test_should_obtain_exact_green_despite_documented_workflow_skew(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Reproduces the 2026-09-30 watchlist publish failure: Foundation certified
+    # run 36781489517 attempt 1 as green with workflow_created_at one second after
+    # workflow_started_at, and this model must accept that evidence, not reject it.
+    evidence = _github_evidence().model_copy(
+        update={
+            "workflow_created_at": "2026-08-27T19:59:59Z",
+            "workflow_started_at": "2026-08-27T19:59:58Z",
+        }
+    )
+    foundation = FakeFoundation(evidence.model_dump_json())
+    monkeypatch.setattr(main_module, "dag", FakeEvidenceDag(foundation))
+    token = cast(dagger.Secret, object())
+    inputs = main_module.TargetInputs(
+        "hseshadr/edge-reco", "edge-reco", "main", "edge-reco.com", "dist", ()
+    )
+
+    context = await main_module._provider_context(token, "44", 2, inputs)
+
+    assert context.github.workflow_started_at == "2026-08-27T19:59:58Z"
+
+
+@pytest.mark.asyncio
+async def test_should_name_the_differing_fields_on_schema_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A payload valid JSON but failing the model's chronology contract must not
+    # collapse to the flat "schema differs" string — the operator needs to see
+    # which evidence was incoherent without reproducing it locally.
+    evidence = _github_evidence().model_copy(update={"check_completed_at": "2026-08-27T19:00:00Z"})
+    foundation = FakeFoundation(evidence.model_dump_json())
+    monkeypatch.setattr(main_module, "dag", FakeEvidenceDag(foundation))
+    token = cast(dagger.Secret, object())
+    inputs = main_module.TargetInputs(
+        "hseshadr/edge-reco", "edge-reco", "main", "edge-reco.com", "dist", ()
+    )
+
+    with pytest.raises(CloudflarePolicyError, match="check timestamps are incoherent"):
+        await main_module._provider_context(token, "44", 2, inputs)
+
+
 def test_should_reject_wrong_explicit_attempt() -> None:
     # Given
     attempt = AttemptIdentity("44", 3)

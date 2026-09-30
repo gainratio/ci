@@ -144,9 +144,39 @@ def test_should_reject_non_dagger_foundation_evidence(field: str, value: object)
 
 
 def test_should_reject_incoherent_foundation_timestamps() -> None:
-    with pytest.raises(ValidationError, match="timestamps are incoherent"):
+    with pytest.raises(ValidationError, match="check timestamps are incoherent"):
         GitHubEvidence.model_validate(
             _github_evidence() | {"check_completed_at": "2026-08-27T19:00:00Z"}
+        )
+
+
+def test_should_tolerate_documented_workflow_start_skew() -> None:
+    # GitHub can stamp a workflow run's created_at up to
+    # MAX_WORKFLOW_START_SKEW_SECONDS after its own run_started_at — observed on
+    # hseshadr/aml-filter run 36033566429 attempt 2, and again (a first attempt, not
+    # a rerun) on run 36781489517 attempt 1, which broke the 2026-09-30 watchlist
+    # publish. portfolio_foundation.github already tolerates this skew when
+    # selecting green evidence; this model must accept the same evidence Foundation
+    # just certified as green.
+    evidence = GitHubEvidence.model_validate(
+        _github_evidence()
+        | {
+            "workflow_created_at": "2026-08-27T19:59:59Z",
+            "workflow_started_at": "2026-08-27T19:59:58Z",
+        }
+    )
+
+    assert evidence.workflow_started_at == "2026-08-27T19:59:58Z"
+
+
+def test_should_reject_workflow_start_skew_beyond_the_tolerance() -> None:
+    with pytest.raises(ValidationError, match="workflow timestamps are incoherent"):
+        GitHubEvidence.model_validate(
+            _github_evidence()
+            | {
+                "workflow_created_at": "2026-08-27T20:00:05Z",
+                "workflow_started_at": "2026-08-27T19:59:58Z",
+            }
         )
 
 

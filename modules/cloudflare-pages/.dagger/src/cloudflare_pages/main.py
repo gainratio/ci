@@ -453,8 +453,14 @@ async def _green_evidence(token: dagger.Secret, repository: str) -> GitHubEviden
     )
     try:
         return GitHubEvidence.model_validate_json(value)
-    except ValidationError:
-        raise CloudflarePolicyError("Foundation GitHub evidence schema differs") from None
+    except ValidationError as exc:
+        raise CloudflarePolicyError(_schema_mismatch_message(exc)) from None
+
+
+def _schema_mismatch_message(exc: ValidationError) -> str:
+    """Name Foundation's differing evidence instead of a flat, undiagnosable string."""
+    detail = "; ".join(str(error["msg"]) for error in exc.errors())[:API_ERROR_BYTES]
+    return f"Foundation GitHub evidence schema differs: {detail}"
 
 
 def _pages_target(inputs: TargetInputs) -> PagesTarget:

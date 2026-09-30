@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,6 +24,13 @@ NUMERIC_ID_TEXT: Final = r"\A[1-9][0-9]*\z"
 TIMESTAMP_TEXT: Final = r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\z"
 DEPLOY_ROOT_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 DEPLOYMENT_ID_PATTERN: Final = re.compile(r"[0-9a-f][0-9a-f-]{0,63}")
+# GitHub can stamp a workflow run's created_at up to a few seconds after its own
+# run_started_at (observed: hseshadr/aml-filter run 36033566429 attempt 2, and again,
+# on a first attempt rather than a rerun, on run 36781489517 attempt 1 — the skew is
+# not rerun-specific). portfolio_foundation.github tolerates exactly this skew
+# (MAX_RUN_START_SKEW_SECONDS) when it certifies evidence as green; this bound must
+# match that tolerance or this model rejects evidence Foundation already certified.
+MAX_WORKFLOW_START_SKEW_SECONDS: Final = 5
 
 
 class ClosedModel(BaseModel):  # type: ignore[explicit-any]  # Pydantic v2 base stub
@@ -74,12 +81,19 @@ class GitHubEvidence(ClosedModel):  # type: ignore[explicit-any]  # Pydantic v2 
 
     @model_validator(mode="after")
     def require_chronology(self) -> GitHubEvidence:
-        check = _ordered(self.check_started_at, self.check_completed_at)
-        workflow = _ordered(
+        if not _ordered(self.check_started_at, self.check_completed_at):
+            raise ValueError(
+                f"check timestamps are incoherent: started={self.check_started_at} "
+                f"completed={self.check_completed_at}"
+            )
+        if not _workflow_ordered(
             self.workflow_created_at, self.workflow_started_at, self.workflow_updated_at
-        )
-        if not check or not workflow:
-            raise ValueError("foundation evidence timestamps are incoherent")
+        ):
+            raise ValueError(
+                "workflow timestamps are incoherent: "
+                f"created={self.workflow_created_at} started={self.workflow_started_at} "
+                f"updated={self.workflow_updated_at}"
+            )
         return self
 
 
@@ -348,6 +362,16 @@ def _valid_repository(owner: str, name: str) -> bool:
 def _ordered(*values: str) -> bool:
     timestamps = tuple(datetime.fromisoformat(value.replace("Z", "+00:00")) for value in values)
     return timestamps == tuple(sorted(timestamps))
+
+
+def _workflow_ordered(created_at: str, started_at: str, updated_at: str) -> bool:
+    """Allow created_at to lead started_at by the documented GitHub clock skew."""
+    created, started, updated = (
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        for value in (created_at, started_at, updated_at)
+    )
+    skew = timedelta(seconds=MAX_WORKFLOW_START_SKEW_SECONDS)
+    return created - skew <= started <= updated
 
 
 def _canonical_domains(primary: str, aliases: tuple[str, ...]) -> tuple[str, ...]:
