@@ -16,6 +16,8 @@ from dagger import dag, field, function, object_type
 from pydantic import ValidationError
 
 from .api import (
+    BEARER_PATTERN,
+    CONTROL_PATTERN,
     CloudflareApiError,
     CloudflarePolicyError,
     deploy_verified_artifact,
@@ -67,6 +69,7 @@ HTTP_STATUS_LENGTH: Final = 3
 API_RESPONSE_BYTES: Final = 262_144
 API_ERROR_BYTES: Final = 16_384
 WRANGLER_OUTPUT_PATH: Final = "/run/provider-output/output.jsonl"
+WRANGLER_STDERR_PATH: Final = "/run/provider-output/stderr"
 WRANGLER_REQUIRED_FLAGS: Final = (
     "--project-name",
     "--branch",
@@ -209,9 +212,15 @@ class CurlPagesOperations:
     async def upload(self, artifact: dagger.Directory, source_sha: str) -> CreatedDeployment:
         container = self._upload_container(artifact, source_sha)
         try:
-            raw = await asyncio.wait_for(container.stdout(), WRANGLER_UPLOAD_SECONDS)
-        except (TimeoutError, dagger.QueryError):
+            exit_code = await asyncio.wait_for(container.exit_code(), WRANGLER_UPLOAD_SECONDS)
+        except TimeoutError:
+            raise CloudflarePolicyError(_wrangler_timeout_message()) from None
+        except dagger.QueryError:
             raise CloudflarePolicyError("Cloudflare Pages direct upload failed") from None
+        if exit_code != 0:
+            stderr = await container.file(WRANGLER_STDERR_PATH).contents()
+            raise CloudflarePolicyError(_wrangler_failure_message(exit_code, stderr))
+        raw = await container.stdout()
         return _parse_wrangler_output(raw, self.target)
 
     async def sleep(self, seconds: int) -> None:
@@ -228,7 +237,10 @@ class CurlPagesOperations:
 
     def _upload_container(self, artifact: dagger.Directory, source_sha: str) -> dagger.Container:
         base = _wrangler_base().with_mounted_directory("/artifact", artifact, read_only=True)
-        base = base.with_mounted_temp("/run/provider-output")
+        # A tmpfs mount (with_mounted_temp) cannot be read back with `.file(path)` after
+        # with_exec, so a real Directory mount is used here to let a failed upload's stderr
+        # be recovered for the caller instead of being silently discarded.
+        base = base.with_mounted_directory("/run/provider-output", dag.directory())
         base = base.with_mounted_temp("/run/provider-cache")
         base = base.with_mounted_temp("/run/provider-config")
         base = base.with_env_variable("WRANGLER_CACHE_DIR", "/run/provider-cache")
@@ -238,7 +250,8 @@ class CurlPagesOperations:
         base = base.with_secret_variable("CLOUDFLARE_ACCOUNT_ID", self.account_id)
         base = base.with_mounted_file("/run/jq", _jq_binary())
         command = ["/bin/sh", "-euc", _wrangler_script(), "--"]
-        return _uncached(base).with_exec([*command, *wrangler_deploy_args(self.target, source_sha)])
+        exec_args = [*command, *wrangler_deploy_args(self.target, source_sha)]
+        return _uncached(base).with_exec(exec_args, expect=dagger.ReturnType.ANY)
 
     def _project_suffix(self) -> str:
         return f"/pages/projects/{self.target.project}"
@@ -995,6 +1008,19 @@ def _jq_deployment() -> str:
 def _wrangler_script() -> str:
     projection = "{type,version,pages_project,deployment_id,url,timestamp}"
     return f"""
-"$@" > /run/provider-output/stdout 2> /run/provider-output/stderr
+"$@" > /run/provider-output/stdout 2> {WRANGLER_STDERR_PATH}
 exec /run/jq -c 'select(.type=="pages-deploy")|{projection}' {WRANGLER_OUTPUT_PATH}
 """
+
+
+def _wrangler_timeout_message() -> str:
+    return f"Cloudflare Pages direct upload timed out after {WRANGLER_UPLOAD_SECONDS}s"
+
+
+def _wrangler_failure_message(exit_code: int, stderr: str) -> str:
+    """Render an actionable, capped, non-secret message for a failed direct upload."""
+    sanitized = BEARER_PATTERN.sub("Bearer [redacted]", CONTROL_PATTERN.sub(" ", stderr)).strip()
+    encoded = sanitized.encode()
+    if len(encoded) > API_ERROR_BYTES:
+        sanitized = encoded[:API_ERROR_BYTES].decode(errors="replace")
+    return f"Cloudflare Pages direct upload failed (exit {exit_code}): {sanitized}"

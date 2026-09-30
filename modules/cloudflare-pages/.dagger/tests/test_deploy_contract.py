@@ -8,7 +8,7 @@ import hashlib
 import json
 import shutil
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Self, cast
@@ -172,6 +172,10 @@ PRIVATE_KEY = __PRIVATE_KEY__
 FAKE_WRANGLER = r'''#!/bin/sh
 set -eu
 [ "$1 $2 $3" = "pages deploy /artifact" ]
+if [ -e /artifact/.force-failure ]; then
+  echo "wrangler: authentication error: Unable to authenticate request [code: 10000]" >&2
+  exit 1
+fi
 entries=$(find /artifact -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
 if [ -e /artifact/_worker.js ]; then
   [ -d /artifact/_worker.js ]
@@ -212,12 +216,13 @@ class MockOperations(CurlPagesOperations):
         base = dag.container(platform=dagger.Platform("linux/amd64")).from_(NODE_IMAGE)
         base = base.with_new_file("/usr/local/bin/wrangler", FAKE_WRANGLER, permissions=0o755)
         base = base.with_mounted_directory("/artifact", artifact, read_only=True)
-        base = base.with_mounted_temp("/run/provider-output")
+        base = base.with_mounted_directory("/run/provider-output", dag.directory())
         base = base.with_mounted_temp("/run/provider-cache").with_mounted_temp("/run/provider-config")
         base = base.with_env_variable("WRANGLER_OUTPUT_FILE_PATH", WRANGLER_OUTPUT_PATH)
         base = base.with_mounted_file("/run/jq", _jq_binary())
         command = ["/bin/sh", "-euc", _wrangler_script(), "--"]
-        return _uncached(base).with_exec([*command, *wrangler_deploy_args(self.target, source_sha)])
+        exec_args = [*command, *wrangler_deploy_args(self.target, source_sha)]
+        return _uncached(base).with_exec(exec_args, expect=dagger.ReturnType.ANY)
 
 def evidence() -> GitHubEvidence:
     return GitHubEvidence.model_validate({"app_id":15368,"branch":"main",
@@ -314,6 +319,16 @@ async def rollback_contract(token: dagger.Secret, account: dagger.Secret,
     events = json.loads(await roll._request("GET", "/__mock/events"))["result"]["domains"]
     assert events.count("rollback") == 1
 
+async def upload_failure_contract(operations: MockOperations) -> None:
+    broken = dag.directory().with_new_file(".force-failure", "1")
+    try: await operations.upload(broken, SHA)
+    except CloudflarePolicyError as error:
+        message = str(error)
+        assert "exit 1" in message
+        assert "Unable to authenticate request" in message
+        return
+    raise ValueError("failed wrangler upload did not raise CloudflarePolicyError")
+
 @object_type
 class ProviderContract:
     @function
@@ -328,6 +343,7 @@ class ProviderContract:
         events = json.loads(await operations._request("GET", "/__mock/events"))["result"]["domains"]
         assert events == ["wrangler-preflight", "get-project", "get-deployments", "disable-git", "get-project", "upload", "get-deployments"]
         assert result.source_sha == SHA
+        await upload_failure_contract(operations)
         await functions_contract(token, account, mock, fixture_files().file("ca.pem"))
         await rollback_contract(token, account, mock, fixture_files().file("ca.pem"))
         tampered = envelope.with_new_file("artifact/dist/index.html", "tampered")
@@ -780,21 +796,34 @@ class FakeContainer:
 
     output: str = ""
     response: str = ""
+    stderr_text: str = ""
+    exit_code_value: int = 0
     commands: list[list[str]] = field(default_factory=list)
     synced: bool = False
+    requested_path: str = ""
 
-    def with_exec(self, command: list[str]) -> FakeContainer:
+    def with_exec(self, command: list[str], **_: object) -> FakeContainer:
         self.commands.append(command)
         return self
 
     async def stdout(self) -> str:
         return self.output
 
+    async def exit_code(self) -> int:
+        return self.exit_code_value
+
     def file(self, path: str) -> FakeContainer:
-        assert path in {"/work/cloudflare-response.json", main_module.WRANGLER_OUTPUT_PATH}
+        assert path in {
+            "/work/cloudflare-response.json",
+            main_module.WRANGLER_OUTPUT_PATH,
+            main_module.WRANGLER_STDERR_PATH,
+        }
+        self.requested_path = path
         return self
 
     async def contents(self) -> str:
+        if self.requested_path == main_module.WRANGLER_STDERR_PATH:
+            return self.stderr_text
         return self.response
 
     async def size(self) -> int:
@@ -1613,6 +1642,44 @@ async def test_should_reject_unframed_provider_response() -> None:
         await main_module._request_result(cast(dagger.Container, FakeContainer("200")))
 
 
+def test_should_build_wrangler_failure_message_with_exit_code_and_stderr() -> None:
+    # Given / When
+    message = main_module._wrangler_failure_message(1, "wrangler: authentication error")
+
+    # Then
+    assert (
+        message == "Cloudflare Pages direct upload failed (exit 1): wrangler: authentication error"
+    )
+
+
+def test_should_cap_wrangler_failure_stderr_snippet() -> None:
+    # Given
+    oversized = "x" * (main_module.API_ERROR_BYTES + 100)
+
+    # When
+    message = main_module._wrangler_failure_message(1, oversized)
+    snippet = message.removeprefix("Cloudflare Pages direct upload failed (exit 1): ")
+
+    # Then
+    assert len(snippet.encode()) == main_module.API_ERROR_BYTES
+
+
+def test_should_redact_bearer_token_from_wrangler_failure_stderr() -> None:
+    # Given / When
+    message = main_module._wrangler_failure_message(1, "denied: Bearer sk-live-abc123secret")
+
+    # Then
+    assert "sk-live-abc123secret" not in message
+    assert "Bearer [redacted]" in message
+
+
+def test_should_build_wrangler_timeout_message() -> None:
+    assert (
+        main_module._wrangler_timeout_message()
+        == "Cloudflare Pages direct upload timed out after 300s"
+    )
+
+
 def test_should_keep_static_envelope_root_contract_unchanged() -> None:
     main_module._require_deploy_root(_target(), ["dist"])
     with pytest.raises(CloudflarePolicyError, match="only envelope root"):
@@ -1910,6 +1977,55 @@ async def test_should_upload_with_bounded_adapter(
 
     # Then
     assert created.deployment_id == "f64788e9-fccd-4d4a-a28a-cb84f88f6"
+
+
+@pytest.mark.asyncio
+async def test_should_report_wrangler_exit_code_and_stderr_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    container = FakeContainer(exit_code_value=1, stderr_text="wrangler: auth token rejected")
+    operations = CurlPagesOperations(
+        cast(dagger.Secret, object()), cast(dagger.Secret, object()), _target()
+    )
+    monkeypatch.setattr(
+        CurlPagesOperations,
+        "_upload_container",
+        lambda *_: cast(dagger.Container, container),
+    )
+
+    # When / Then
+    with pytest.raises(CloudflarePolicyError) as error:
+        await operations.upload(cast(dagger.Directory, object()), FULL_SHA)
+    assert "exit 1" in str(error.value)
+    assert "wrangler: auth token rejected" in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_should_distinguish_timeout_from_wrangler_exit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    container = FakeContainer(exit_code_value=1, stderr_text="irrelevant, never reached")
+    operations = CurlPagesOperations(
+        cast(dagger.Secret, object()), cast(dagger.Secret, object()), _target()
+    )
+    monkeypatch.setattr(
+        CurlPagesOperations,
+        "_upload_container",
+        lambda *_: cast(dagger.Container, container),
+    )
+
+    async def _raise_timeout(coro: object, _timeout: float) -> None:
+        cast(Coroutine[object, object, object], coro).close()
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", _raise_timeout)
+
+    # When / Then
+    with pytest.raises(CloudflarePolicyError, match="timed out after 300s") as error:
+        await operations.upload(cast(dagger.Directory, object()), FULL_SHA)
+    assert "irrelevant, never reached" not in str(error.value)
 
 
 @pytest.mark.asyncio
