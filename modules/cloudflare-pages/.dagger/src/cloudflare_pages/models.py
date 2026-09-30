@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,6 +24,7 @@ NUMERIC_ID_TEXT: Final = r"\A[1-9][0-9]*\z"
 TIMESTAMP_TEXT: Final = r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\z"
 DEPLOY_ROOT_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 DEPLOYMENT_ID_PATTERN: Final = re.compile(r"[0-9a-f][0-9a-f-]{0,63}")
+MAX_RUN_START_SKEW_SECONDS: Final = 5
 
 
 class ClosedModel(BaseModel):  # type: ignore[explicit-any]  # Pydantic v2 base stub
@@ -75,7 +76,7 @@ class GitHubEvidence(ClosedModel):  # type: ignore[explicit-any]  # Pydantic v2 
     @model_validator(mode="after")
     def require_chronology(self) -> GitHubEvidence:
         check = _ordered(self.check_started_at, self.check_completed_at)
-        workflow = _ordered(
+        workflow = _workflow_ordered(
             self.workflow_created_at, self.workflow_started_at, self.workflow_updated_at
         )
         if not check or not workflow:
@@ -348,6 +349,15 @@ def _valid_repository(owner: str, name: str) -> bool:
 def _ordered(*values: str) -> bool:
     timestamps = tuple(datetime.fromisoformat(value.replace("Z", "+00:00")) for value in values)
     return timestamps == tuple(sorted(timestamps))
+
+
+def _workflow_ordered(created_value: str, started_value: str, updated_value: str) -> bool:
+    created, started, updated = (
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        for value in (created_value, started_value, updated_value)
+    )
+    skew = timedelta(seconds=MAX_RUN_START_SKEW_SECONDS)
+    return created - skew <= started <= updated
 
 
 def _canonical_domains(primary: str, aliases: tuple[str, ...]) -> tuple[str, ...]:
