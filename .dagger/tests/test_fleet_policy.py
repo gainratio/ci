@@ -1822,3 +1822,37 @@ def test_should_report_stale_foundation_pin_through_repository_contract() -> Non
 
     # Then the stale release gate is the only failure
     assert codes == ("pin-below-required-minimum",)
+
+
+BROKEN_MODULE = "import dagger\n\ntry:\n    run()\nexcept OSError, ValueError:\n    pass\n"
+
+
+def test_should_report_unparsable_python_module_as_finding_not_crash() -> None:
+    # Given a consumer module whose syntax this scanner cannot parse (line 5)
+    snapshot = _snapshot(INGRESS, module=BROKEN_MODULE, module_path=".dagger/src/example/queue.py")
+    expectation = RepositoryExpectation(
+        name="example",
+        required_contexts=("Dagger",),
+        linear_history=True,
+        conversation_resolution=True,
+    )
+
+    # When the repository contract is evaluated
+    findings = validate_repository(snapshot, expectation)
+
+    # Then the file and the parser's complaint are reported instead of raising
+    syntax = [item for item in findings if item.code == "python-syntax"]
+    assert [item.path for item in syntax] == [".dagger/src/example/queue.py"]
+    assert "line 5" in syntax[0].message
+    assert "SyntaxError" in syntax[0].message
+
+
+def test_should_report_no_python_syntax_finding_for_clean_module() -> None:
+    # Given a consumer module that parses cleanly
+    snapshot = _snapshot(INGRESS)
+
+    # When the repository contract is evaluated
+    codes = _codes(snapshot)
+
+    # Then no syntax finding appears
+    assert "python-syntax" not in codes

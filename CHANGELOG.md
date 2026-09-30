@@ -4,6 +4,10 @@
 
 ### Added
 
+- `python-syntax`: the fleet policy reports a consumer Python module it cannot parse as a
+  finding that names the file, the syntax error and the line, instead of crashing the whole
+  scan. On 2026-09-27 a `except A, B:` (Python 3.14 syntax) in aml-filter crashed the scan and
+  hid the real message.
 - Publisher lineage is now required: every publisher job must open with the central
   `release-lineage` / `release-provenance` step. A publisher without it, or with it after the
   download, is a `publisher-lineage` finding (`central lineage step required first`).
