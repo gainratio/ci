@@ -1398,8 +1398,9 @@ def oidc_arguments_are_typed(step: WorkflowStep) -> bool:
 def validate_modules(modules: tuple[SourceFile, ...]) -> tuple[PolicyFinding, ...]:
     """Require explicit source construction and typed credential arguments."""
     python, typescript = split_modules(modules)
-    trees = parse_python_modules(python)
-    findings = validate_module_source(trees, typescript)
+    trees, unparsable = parse_python_modules(python)
+    findings = list(unparsable)
+    findings.extend(validate_module_source(trees, typescript))
     findings.extend(validate_python_secrets(trees))
     findings.extend(validate_typescript_secrets(typescript))
     findings.extend(validate_python_commands(trees))
@@ -1418,9 +1419,26 @@ def split_modules(
 
 def parse_python_modules(
     modules: tuple[SourceFile, ...],
-) -> tuple[tuple[SourceFile, ast.Module], ...]:
-    """Parse every authored Python module against its exact path."""
-    return tuple((module, ast.parse(module.text, filename=module.path)) for module in modules)
+) -> tuple[tuple[tuple[SourceFile, ast.Module], ...], tuple[PolicyFinding, ...]]:
+    """Split authored Python modules into parsed trees and syntax findings."""
+    trees: list[tuple[SourceFile, ast.Module]] = []
+    unparsable: list[PolicyFinding] = []
+    for module in modules:
+        parsed = parse_python_module(module)
+        if isinstance(parsed, ast.Module):
+            trees.append((module, parsed))
+        else:
+            unparsable.append(parsed)
+    return tuple(trees), tuple(unparsable)
+
+
+def parse_python_module(module: SourceFile) -> ast.Module | PolicyFinding:
+    """Parse one authored Python module, reporting unparsable source as a finding."""
+    try:
+        return ast.parse(module.text, filename=module.path)
+    except SyntaxError as error:
+        detail = f"{type(error).__name__}: {error.msg} (line {error.lineno})"
+        return finding("python-syntax", module.path, detail)
 
 
 def validate_python_secrets(
