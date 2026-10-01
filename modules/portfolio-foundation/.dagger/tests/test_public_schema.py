@@ -51,6 +51,11 @@ EXPECTED_PUBLIC_SCHEMA: tuple[PublicSignature, ...] = (
         "dagger.Directory",
     ),
     (
+        "docs_only",
+        (("repository", "str"), ("head_sha", "str"), ("base_sha", "str")),
+        "bool",
+    ),
+    (
         "green_main",
         (("github_token", "dagger.Secret"), ("repository", "str")),
         "CheckEvidence",

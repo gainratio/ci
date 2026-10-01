@@ -50,6 +50,9 @@
   scan now discovers `hseshadr/ci` consumers from default-branch `dagger.json` and fails with
   `uncovered-consumer` for any that are not listed. Unreadable repositories become an
   `evidence-unreadable` finding, so they no longer stop the scan.
+- `portfolio-foundation` `docs-only`: a conservative pull-request classifier so consumers can
+  skip their heavy gate when `base...head` touches only root or `docs/` Markdown, while the
+  required check still reports. No base, any doubt, or any non-doc path means the full gate.
 
 ### Changed
 
