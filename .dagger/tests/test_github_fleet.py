@@ -301,11 +301,19 @@ def test_should_parse_in_progress_checks_without_treating_them_as_green() -> Non
 def test_should_name_minimal_scope_when_protection_read_is_forbidden() -> None:
     # Given a token that can read source but not effective protection
     responses = _responses()
-    responses["repos/hseshadr/example/branches/main/protection"] = _json({}, status=403)
+    responses["repos/hseshadr/example/branches/main/protection"] = _json(
+        {"message": "forbidden detail must stay private"}, status=403
+    )
 
     # When the authoritative reader reaches the protected endpoint
-    with pytest.raises(FleetAccessError, match="Administration:read"):
+    with pytest.raises(FleetAccessError) as caught:
         read_repository(FakeTransport(responses), "hseshadr", "example")
+
+    # Then it retains permission guidance without reflecting arbitrary provider text
+    assert str(caught.value) == (
+        "GitHub 403 for repos/hseshadr/example/branches/main/protection; "
+        "token requires Administration:read"
+    )
 
 
 def test_should_fail_closed_when_tree_or_check_page_is_incomplete() -> None:
