@@ -179,6 +179,23 @@ def test_should_report_unreadable_repository_as_finding_and_keep_scanning() -> N
     assert "404" in result.findings[0].message
 
 
+def test_should_report_absent_main_branch_protection_as_actionable_finding() -> None:
+    # Given GitHub explicitly reports that the repository's main branch is not protected
+    responses = exact_main_responses()
+    path = "repos/hseshadr/example/branches/main/protection"
+    responses[path] = _json({"message": "Branch not protected"}, status=404)
+
+    # When that repository is scanned
+    result = scan_repository(ExactMainTransport(responses), expectation("example"))
+
+    # Then the finding names the repository, branch, and missing control without blaming the token
+    assert [item.code for item in result.findings] == ["evidence-unreadable"]
+    assert result.findings[0].message == (
+        "GitHub branch protection is absent for hseshadr/example branch main; "
+        "protect main before running the authoritative fleet scan"
+    )
+
+
 def test_should_fail_hosted_scan_for_uncovered_consumer_before_reviewed_repositories() -> None:
     # Given a live listing where one consumer is unknown to the reviewed contract
     responses = {

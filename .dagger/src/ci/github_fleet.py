@@ -371,6 +371,13 @@ class CodeqlPayload:
     state: str
 
 
+@validated_dataclass(config=BOUNDARY_CONFIG)
+class GitHubErrorPayload:
+    """Non-secret provider message used only for reviewed error distinctions."""
+
+    message: str
+
+
 def read_repository(transport: GitHubTransport, owner: str, name: str) -> RepositorySnapshot:
     """Read one fleet member exclusively from authoritative exact-main endpoints."""
     base = f"repos/{owner}/{name}"
@@ -446,17 +453,50 @@ def read_model[T](transport: GitHubTransport, path: str, model: type[T]) -> T:
 def parse_model[T](response: HttpResponse, path: str, model: type[T]) -> T:
     """Validate one already-read GitHub response against its exact schema."""
     if response.status != HTTP_OK:
-        raise access_error(path, response.status)
+        raise access_error(path, response)
     try:
         return TypeAdapter(model).validate_json(response.body)
     except ValidationError as error:
         raise FleetAccessError(f"invalid authoritative response for {path}: {error}") from error
 
 
-def access_error(path: str, status: int) -> FleetAccessError:
+def access_error(path: str, response: HttpResponse) -> FleetAccessError:
     """Name the minimum fine-grained PAT permission for one failed endpoint."""
+    repository = unprotected_repository(path, response)
+    if repository is not None:
+        return FleetAccessError(
+            f"GitHub branch protection is absent for {repository} branch main; "
+            "protect main before running the authoritative fleet scan"
+        )
     scope = required_scope(path)
-    return FleetAccessError(f"GitHub {status} for {path}; token requires {scope}")
+    return FleetAccessError(f"GitHub {response.status} for {path}; token requires {scope}")
+
+
+def unprotected_repository(path: str, response: HttpResponse) -> str | None:
+    """Return repository identity only for GitHub's explicit unprotected-main response."""
+    repository = main_protection_repository(path)
+    if repository is None:
+        return None
+    if response.status != HTTP_NOT_FOUND:
+        return None
+    return repository if github_error_message(response.body) == "Branch not protected" else None
+
+
+def main_protection_repository(path: str) -> str | None:
+    """Extract owner/repository only from the reviewed main-protection endpoint."""
+    suffix = "/branches/main/protection"
+    if not path.startswith("repos/") or not path.endswith(suffix):
+        return None
+    return path.removeprefix("repos/").removesuffix(suffix)
+
+
+def github_error_message(body: str) -> str | None:
+    """Read the typed GitHub error discriminator without reflecting response text."""
+    try:
+        payload = TypeAdapter(GitHubErrorPayload).validate_json(body)
+    except ValidationError:
+        return None
+    return payload.message
 
 
 def required_scope(path: str) -> str:
@@ -669,7 +709,7 @@ def read_source(transport: GitHubTransport, base: str, sha: str, path: str) -> S
 def parse_content_response(response: HttpResponse, path: str) -> ContentPayload:
     """Validate one already-read contents response."""
     if response.status != HTTP_OK:
-        raise access_error(path, response.status)
+        raise access_error(path, response)
     try:
         return TypeAdapter(ContentPayload).validate_json(response.body)
     except ValidationError as error:
