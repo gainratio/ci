@@ -21,9 +21,9 @@ const ARTIFACT_NAME = "typescript-artifact.txt"
 const TRANSPORT_MARKERS = ["api.cloudflare.com", "api.github.com", "wrangler"]
 const PACKAGE_REPOSITORY = "hseshadr/edgeproc-core"
 const PACKAGE_URL = "https://github.com/hseshadr/edgeproc-core.git"
-const PACKAGE_SHA = "fa1da057024e2c41a1fb17641f0383f51a5628f0"
+const PACKAGE_SHA = "0bf2a8394b205f099b14b71303627ef871715622"
 const PACKAGE_PROJECT = "edgeproc-core"
-const PACKAGE_VERSION = "0.4.2"
+const PACKAGE_VERSION = "0.4.3"
 
 @object()
 export class TypescriptConsumer {

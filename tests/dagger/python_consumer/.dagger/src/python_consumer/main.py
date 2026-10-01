@@ -37,9 +37,9 @@ PAYLOAD_PARTS: Final = (
 EXPECTED_FINDINGS: Final = 2
 PACKAGE_REPOSITORY: Final = "hseshadr/edgeproc-core"
 PACKAGE_URL: Final = "https://github.com/hseshadr/edgeproc-core.git"
-PACKAGE_SHA: Final = "fa1da057024e2c41a1fb17641f0383f51a5628f0"
+PACKAGE_SHA: Final = "0bf2a8394b205f099b14b71303627ef871715622"
 PACKAGE_PROJECT: Final = "edgeproc-core"
-PACKAGE_VERSION: Final = "0.4.2"
+PACKAGE_VERSION: Final = "0.4.3"
 PACKAGE_PRODUCT_COUNT: Final = 2
 
 
