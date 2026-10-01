@@ -107,6 +107,29 @@ def test_should_require_full_source_and_attempt_identity() -> None:
     assert evidence.attempt_identity == ("44", 2)
 
 
+def test_should_accept_bounded_github_run_start_clock_skew() -> None:
+    payload = _github_evidence() | {
+        "workflow_created_at": "2026-08-27T20:00:04Z",
+        "workflow_started_at": "2026-08-27T19:59:59Z",
+        "workflow_updated_at": "2026-08-27T20:00:05Z",
+    }
+
+    evidence = GitHubEvidence.model_validate(payload)
+
+    assert evidence.workflow_started_at == "2026-08-27T19:59:59Z"
+
+
+def test_should_reject_github_run_start_clock_skew_beyond_bound() -> None:
+    payload = _github_evidence() | {
+        "workflow_created_at": "2026-08-27T20:00:05Z",
+        "workflow_started_at": "2026-08-27T19:59:59Z",
+        "workflow_updated_at": "2026-08-27T20:00:06Z",
+    }
+
+    with pytest.raises(ValidationError, match="timestamps are incoherent"):
+        GitHubEvidence.model_validate(payload)
+
+
 def test_should_reject_abbreviated_source_identity() -> None:
     # Given
     payload = _github_evidence() | {"commit_sha": "a" * 7}
