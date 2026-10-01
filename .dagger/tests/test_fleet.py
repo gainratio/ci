@@ -10,7 +10,7 @@ def test_should_enforce_exact_consumer_set_when_central_is_not_main() -> None:
     # When the immutable fleet expectations are selected
     expectations = repository_expectations(include_central)
 
-    # Then exactly the nine migrated consumers require sole Dagger
+    # Then exactly the nine migrated consumers have their reviewed checks
     assert tuple(item.name for item in expectations) == (
         "agentic-context-service",
         "agentic-saga",
@@ -22,7 +22,13 @@ def test_should_enforce_exact_consumer_set_when_central_is_not_main() -> None:
         "edgeproc-core",
         "privacy-core",
     )
-    assert all(item.required_contexts == ("Dagger",) for item in expectations)
+    assert next(item for item in expectations if item.name == "aml-filter").required_contexts == (
+        "Dagger",
+        "Dev-tool audit",
+    )
+    assert all(
+        item.required_contexts == ("Dagger",) for item in expectations if item.name != "aml-filter"
+    )
     assert all(item.conversation_resolution for item in expectations)
 
 
@@ -37,3 +43,17 @@ def test_should_include_central_only_after_main_cutover() -> None:
     assert tuple(item.name for item in expectations)[-1] == "ci"
     assert expectations[-1].linear_history is False
     assert expectations[-1].conversation_resolution is False
+
+
+def test_should_expect_dev_tool_audit_only_for_aml_filter() -> None:
+    # Given aml-filter main intentionally protects both of its GitHub Actions checks
+    expectations = repository_expectations(include_central=True)
+
+    # When the reviewed fleet contract is selected
+    contexts = {item.name: item.required_contexts for item in expectations}
+
+    # Then aml-filter keeps both exact app-bound checks and every other repo stays unchanged
+    assert contexts["aml-filter"] == ("Dagger", "Dev-tool audit")
+    assert all(
+        required == ("Dagger",) for name, required in contexts.items() if name != "aml-filter"
+    )
