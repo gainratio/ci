@@ -268,6 +268,48 @@ from JSON. The returned deployment ID forces evaluation of the typed provider re
 The provider resolves exact-current-`main` green Dagger evidence internally. A caller cannot
 authorize a deployment with stale or caller-authored evidence.
 
+### Skip the heavy gate on docs-only pull requests
+
+A pull request that only edits Markdown still pays the full gate. `foundation.docs_only` lets
+a consumer's `ci` return early for those, while its required `Dagger` check still runs and
+reports success. Do not use `paths-ignore` instead: a skipped workflow never reports its
+required check, and the pull request waits forever.
+
+The answer is `true` only when every path in `base...head` is a plain Markdown file at the
+repository root or under `docs/`. Everything else means `false` and the full gate runs: no
+base SHA (every push, schedule, and dispatch), an empty diff, any other path (`.github/`,
+nested `README.md`, lockfiles, manifests, code), a symlink, submodule, or executable, a
+rename or type change, or any Git failure. An invalid SHA is an error, not a skip.
+
+Pass the pull request base SHA through the environment, the same way deploy workflows pass
+event values:
+
+```yaml
+      - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        with:
+          version: "0.21.8"
+          call: ci --commit-sha=${{ github.sha }} --base-sha="$BASE_SHA"
+```
+
+Then branch at the top of `ci`. Keep the secret scan and any test that reads Markdown (README
+contracts, documented constants) on the fast path, because the full gate will not run until
+`main`, and a Markdown file can still leak a secret:
+
+```python
+@function
+async def ci(self, commit_sha: str, base_sha: str = "") -> str:
+    if await dag.foundation().docs_only(REPOSITORY, commit_sha, base_sha):
+        await dag.foundation().guard(self.source, REPOSITORY, commit_sha).sync()
+        await self._docs_contracts().sync()
+        return "docs-only change: docs contracts passed, heavy gate skipped"
+    return await self._full_gate(commit_sha)
+```
+
+Push to `main` never passes a base, so every merge still runs the full gate before any
+`workflow_run` deploy can start.
+
 ### Opt in to Pages Functions
 
 Static consumers keep the call above unchanged. A Functions consumer authenticates exactly two

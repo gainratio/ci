@@ -11,6 +11,7 @@ from .artifact import (
     parse_producing_identity,
     verify_envelope_directory,
 )
+from .change_scope import classify_docs_only
 from .github import CheckEvidence, resolve_green_main
 from .guard import build_guard
 from .identity import CommitIdentity, FullSha, RepositoryRef
@@ -77,6 +78,15 @@ class PortfolioFoundation:
         return await verify_envelope_directory(
             envelope, identity, module_sha, tuple(allowed_roots), run_id
         )
+
+    @function
+    async def docs_only(self, repository: str, head_sha: str, base_sha: str = "") -> bool:
+        """Return true only when base...head changes nothing but plain Markdown docs.
+
+        Pass the pull request base SHA. With no base (push, schedule, dispatch) the
+        answer is always false, so main and delivery paths always run the full gate.
+        """
+        return await classify_docs_only(repository, head_sha, base_sha)
 
     @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
     async def green_main(self, github_token: dagger.Secret, repository: str) -> CheckEvidence:
