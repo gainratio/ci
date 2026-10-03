@@ -4,6 +4,12 @@
 
 ### Added
 
+- GHCR image mirror. `mirror/images.json` lists every upstream image the shared modules pin,
+  plus the Dagger engine, each by digest. `image-mirror.yml` copies them with a
+  checksum-pinned `crane` (v0.22.1) to `ghcr.io/hseshadr/mirror/<upstream host>/<path>` on
+  manifest change, weekly, and on dispatch, then proves the mirror tag has the same digest
+  and pulls anonymously. PRs only check that each upstream digest exists. A unit test fails
+  if module code pins an image the manifest does not mirror.
 - `python-syntax`: the fleet policy reports a consumer Python module it cannot parse as a
   finding that names the file, the syntax error and the line, instead of crashing the whole
   scan. On 2026-09-27 a `except A, B:` (Python 3.14 syntax) in aml-filter crashed the scan and

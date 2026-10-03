@@ -68,7 +68,13 @@ def test_should_delete_every_retired_central_execution_surface() -> None:
     remaining = {path.name for path in WORKFLOWS.glob("*.yml")}
 
     # When central execution surfaces are inventoried
-    expected = {"dagger.yml", "consumer-drift.yml", "dagger-security.yml", "module-canary.yml"}
+    expected = {
+        "dagger.yml",
+        "consumer-drift.yml",
+        "dagger-security.yml",
+        "image-mirror.yml",
+        "module-canary.yml",
+    }
 
     # Then only thin Dagger ingress remains; classifiers/templates are gone
     assert remaining == expected
@@ -96,3 +102,23 @@ def test_should_keep_module_canary_shadowed_and_dagger_owned() -> None:
     assert canary.text.index("actions/checkout@") < canary.text.index("dagger/dagger-for-github@")
     assert "persist-credentials: false" in canary.text
     assert all(item not in canary.text for item in ("- run:", "actions/setup-", "actions/cache@"))
+
+
+def test_should_write_the_mirror_only_from_main_through_dagger() -> None:
+    # Given the GHCR mirror ingress
+    mirror = _source("image-mirror.yml")
+    jobs = mirror.text.split("\n  sync:\n")
+
+    # When its jobs are checked by fleet policy and their boundaries inspected
+    findings = validate_workflow(mirror)
+
+    # Then PRs get a read-only upstream check; only main, schedule, or dispatch can write
+    assert findings == ()
+    assert len(jobs) == 2
+    verify, sync = jobs
+    assert "image-mirror-verify" in verify and "packages:" not in verify
+    assert "if: github.event_name == 'pull_request'" in verify
+    assert "packages: write" in sync and "image-mirror --github-token=env:GITHUB_TOKEN" in sync
+    assert "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'" in sync
+    assert all(item in mirror.text for item in ("schedule:", "workflow_dispatch:", "mirror/**"))
+    assert "pull_request_target" not in mirror.text
