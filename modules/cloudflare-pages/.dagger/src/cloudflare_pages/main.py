@@ -44,14 +44,15 @@ from .models import (
 )
 
 CURL_IMAGE: Final = (
-    "curlimages/curl:8.16.0@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
+    "ghcr.io/hseshadr/mirror/docker.io/curlimages/curl:8.16.0@sha256:"
+    "463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 )
 NODE_IMAGE: Final = (
-    "node:24.6.0-bookworm-slim@sha256:"
+    "ghcr.io/hseshadr/mirror/docker.io/library/node:24.6.0-bookworm-slim@sha256:"
     "9b741b28148b0195d62fa456ed84dd6c953c1f17a3761f3e6e6797a754d9edff"
 )
 JQ_IMAGE: Final = (
-    "ghcr.io/jqlang/jq:1.8.1@sha256:"
+    "ghcr.io/hseshadr/mirror/ghcr.io/jqlang/jq:1.8.1@sha256:"
     "95de8f005ca027686a1ca3b0853e2bb219062438015862816159f3f25a4d4230"
 )
 WRANGLER_VERSION: Final = "4.103.0"

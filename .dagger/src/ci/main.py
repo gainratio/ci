@@ -11,19 +11,20 @@ import dagger
 from dagger import check, dag, field, function, object_type
 
 PYTHON_IMAGE: Final = (
-    "python:3.13.14-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
+    "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.14-slim@sha256:"
+    "9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
 )
 UV_IMAGE: Final = (
-    "ghcr.io/astral-sh/uv:0.11.32@sha256:"
+    "ghcr.io/hseshadr/mirror/ghcr.io/astral-sh/uv:0.11.32@sha256:"
     "df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c"
 )
 # Module gates need git, uvx, and a Dagger CLI that reaches the engine through nesting.
 MODULE_IMAGE: Final = (
-    "python:3.13.14-bookworm@sha256:"
+    "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.14-bookworm@sha256:"
     "8b9a8b28d9cc221c6ab5d40e9cfcd99429959f6a8f5171612a99147975ab043f"
 )
 ENGINE_IMAGE: Final = (
-    "registry.dagger.io/engine:v0.21.8@sha256:"
+    "ghcr.io/hseshadr/mirror/registry.dagger.io/engine:v0.21.8@sha256:"
     "c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336"
 )
 # The mirror job copies from upstream on purpose: it must not depend on the mirror it repairs.

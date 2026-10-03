@@ -18,7 +18,14 @@ from .identity import CommitIdentity
 
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 MAX_PERMISSIONS = 0o7777
-HASH_IMAGE = "alpine@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
+# Evidence records the upstream identity; pulls use the GHCR mirror copy of the same digest.
+HASH_IMAGE_IDENTITY = (
+    "alpine@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
+)
+HASH_IMAGE = (
+    "ghcr.io/hseshadr/mirror/docker.io/library/alpine:3.22.1"
+    "@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
+)
 INVENTORY_TRAILER = "portfolio-foundation-inventory-v1"
 INVENTORY_SCRIPT = r"""set -eu
 zero=$(printf '%064d' 0)
