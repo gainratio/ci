@@ -349,6 +349,46 @@ an authenticated `dist` or `functions` input. It stages only that `_worker.js` m
 deployment-ID convergence used for static sites. Static mode retains its exact arguments and
 ordering.
 
+## Pull images from the GHCR mirror
+
+**TL;DR:** the shared modules pull every image from `ghcr.io/hseshadr/mirror/...` by digest, so
+a Docker Hub or `registry.dagger.io` outage no longer fails CI. A consumer adopts it with two
+edits.
+
+`mirror/images.json` lists each upstream image and its digest. `image-mirror.yml` copies them
+with `crane copy` to `ghcr.io/hseshadr/mirror/<upstream host>/<upstream path>:<tag>`. Then it
+checks that the copy has the same digest and pulls anonymously. The bytes are the same as
+upstream. Only the registry changes.
+
+1. Start the Dagger engine from the mirror. `dagger/dagger-for-github` has no engine-image
+   input (checked at v8.4.1, `action.yml`). The Dagger CLI starts its engine from
+   `_EXPERIMENTAL_DAGGER_RUNNER_HOST=image://<ref>`
+   ([custom runner docs](https://docs.dagger.io/reference/configuration/custom-runner)). The
+   engine must match the CLI version. Set it on every `dagger/dagger-for-github` step:
+
+   ```yaml
+   - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+     env:
+       _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/hseshadr/mirror/registry.dagger.io/engine:v0.21.8@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336
+     with:
+       version: "0.21.8"
+   ```
+
+2. Pin the Python SDK runtime image. If `pyproject.toml` declares a Python version and sets no
+   `base-image`, the SDK pulls `python:<version>-slim` from Docker Hub by tag, with no digest
+   (`sdk/python/runtime/discovery.go`, `parseBaseImage`, v0.21.8). Set it explicitly in the
+   module's `pyproject.toml`:
+
+   ```toml
+   [tool.dagger]
+   base-image = "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.14-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
+   ```
+
+Point your own image constants at the mirror the same way. To add an image, add it to
+`mirror/images.json` in a PR here, merge it, and wait for the mirror job to go green. Then the
+consumer can use it. The Python SDK's `ghcr.io/astral-sh/uv` runtime image still comes from
+its upstream ghcr.io, because the SDK lets you change only its version, not its registry.
+
 ## Secrets and the production environment
 
 GitHub Actions injects credentials into Dagger as typed `Secret` arguments. After a repository

@@ -15,6 +15,7 @@ import dagger
 import pytest
 
 from portfolio_foundation import artifact as artifact_module
+from portfolio_foundation import source as source_module
 from portfolio_foundation.artifact import (
     ENGINE_VERSION,
     TOOLCHAIN,
@@ -191,6 +192,18 @@ def test_should_record_digest_pinned_hasher_when_manifest_is_built() -> None:
     # Given / When / Then
     assert TOOLCHAIN[0] == f"dagger-engine:{ENGINE_VERSION}"
     assert "@sha256:" in TOOLCHAIN[1]
+
+
+def test_should_keep_toolchain_identity_when_the_hasher_is_pulled_from_a_mirror() -> None:
+    # Given evidence manifests already published with the upstream hasher identity
+    digest = "sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
+    upstream = "alpine@" + digest
+
+    # Then the pull location may move to the GHCR mirror (same digest, same bytes) but the
+    # recorded toolchain, which verification compares exactly, does not change
+    assert ("dagger-engine:v0.21.8", f"artifact-hasher:{upstream}") == TOOLCHAIN
+    assert source_module.HASH_IMAGE.endswith(f"@{digest}")
+    assert source_module.HASH_IMAGE.startswith("ghcr.io/hseshadr/mirror/docker.io/library/alpine:")
 
 
 def test_should_parse_exact_consumer_and_producing_identities_when_enveloping() -> None:

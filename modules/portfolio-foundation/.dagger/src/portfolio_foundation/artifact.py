@@ -16,6 +16,7 @@ from dagger import dag
 from .identity import CommitIdentity, FullSha, RepositoryRef
 from .source import (
     HASH_IMAGE,
+    HASH_IMAGE_IDENTITY,
     INVENTORY_TRAILER,
     EntryType,
     InventoryEntry,
@@ -27,7 +28,7 @@ from .source import (
 ENGINE_VERSION: Final = "v0.21.8"
 EPOCH: Final = 0
 EVIDENCE_IMAGE: Final = (
-    "python:3.13.15-alpine3.24"
+    "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.15-alpine3.24"
     "@sha256:540c7d91f98ff6880174c40e99067bf5941eb54d818a7a5e094d188b196a934d"
 )
 IDENTITY_SEPARATOR_INDEX: Final = 40
@@ -40,7 +41,7 @@ MAX_RUN_ID_VALUE: Final = (2**64) - 1
 MIN_PRODUCING_IDENTITY_LENGTH: Final = 42
 SCHEMA_VERSION: Final = 1
 SUMS_PATH: Final = "evidence/SHA256SUMS"
-TOOLCHAIN: Final = ("dagger-engine:v0.21.8", f"artifact-hasher:{HASH_IMAGE}")
+TOOLCHAIN: Final = ("dagger-engine:v0.21.8", f"artifact-hasher:{HASH_IMAGE_IDENTITY}")
 RUN_ID_PATTERN: Final = re.compile(r"[1-9][0-9]*")
 SHA256_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
 NORMAL_MODES: Final = frozenset((0o644, 0o755))
