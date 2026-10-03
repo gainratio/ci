@@ -1,0 +1,62 @@
+name: GHCR image mirror
+
+# Copies every image in mirror/images.json to ghcr.io/hseshadr/mirror/<upstream> by digest,
+# then proves the mirror tag resolves to the same digest and pulls anonymously.
+# PRs only check that each pinned upstream digest exists; nothing is written from a PR.
+on:
+  pull_request:
+    paths:
+      - "mirror/**"
+      - ".dagger/src/ci/image_mirror.py"
+      - ".github/workflows/image-mirror.yml"
+  push:
+    branches: [main]
+    paths:
+      - "mirror/**"
+      - ".dagger/src/ci/image_mirror.py"
+      - ".github/workflows/image-mirror.yml"
+  schedule:
+    - cron: "29 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-mirror-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify upstream digests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: "0.21.8"
+          verb: call
+          args: image-mirror-verify
+  sync:
+    name: Copy and prove mirror
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # Push mirror copies to ghcr.io/hseshadr/mirror/*.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: "0.21.8"
+          verb: call
+          args: image-mirror --github-token=env:GITHUB_TOKEN

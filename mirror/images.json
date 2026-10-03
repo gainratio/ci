@@ -1,0 +1,64 @@
+{
+  "images": [
+    {
+      "source": "docker.io/library/python:3.13.14-slim",
+      "digest": "sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/python"
+    },
+    {
+      "source": "docker.io/library/python:3.13.14-bookworm",
+      "digest": "sha256:8b9a8b28d9cc221c6ab5d40e9cfcd99429959f6a8f5171612a99147975ab043f",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/python"
+    },
+    {
+      "source": "docker.io/library/python:3.13.15-alpine3.24",
+      "digest": "sha256:540c7d91f98ff6880174c40e99067bf5941eb54d818a7a5e094d188b196a934d",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/python"
+    },
+    {
+      "source": "docker.io/library/alpine:3.22.1",
+      "digest": "sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/alpine"
+    },
+    {
+      "source": "docker.io/library/node:24.6.0-bookworm-slim",
+      "digest": "sha256:9b741b28148b0195d62fa456ed84dd6c953c1f17a3761f3e6e6797a754d9edff",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/node"
+    },
+    {
+      "source": "docker.io/library/node:24.16.0-bookworm-slim",
+      "digest": "sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/node"
+    },
+    {
+      "source": "docker.io/curlimages/curl:8.16.0",
+      "digest": "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/curlimages/curl"
+    },
+    {
+      "source": "docker.io/rhysd/actionlint:1.7.10",
+      "digest": "sha256:ef8299f97635c4c30e2298f48f30763ab782a4ad2c95b744649439a039421e36",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/rhysd/actionlint"
+    },
+    {
+      "source": "ghcr.io/jqlang/jq:1.8.1",
+      "digest": "sha256:95de8f005ca027686a1ca3b0853e2bb219062438015862816159f3f25a4d4230",
+      "mirror": "ghcr.io/hseshadr/mirror/ghcr.io/jqlang/jq"
+    },
+    {
+      "source": "ghcr.io/gitleaks/gitleaks:v8.30.1",
+      "digest": "sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f",
+      "mirror": "ghcr.io/hseshadr/mirror/ghcr.io/gitleaks/gitleaks"
+    },
+    {
+      "source": "ghcr.io/astral-sh/uv:0.11.32",
+      "digest": "sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c",
+      "mirror": "ghcr.io/hseshadr/mirror/ghcr.io/astral-sh/uv"
+    },
+    {
+      "source": "registry.dagger.io/engine:v0.21.8",
+      "digest": "sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336",
+      "mirror": "ghcr.io/hseshadr/mirror/registry.dagger.io/engine"
+    }
+  ]
+}

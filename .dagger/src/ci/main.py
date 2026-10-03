@@ -26,6 +26,25 @@ ENGINE_IMAGE: Final = (
     "registry.dagger.io/engine:v0.21.8@sha256:"
     "c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336"
 )
+# The mirror job copies from upstream on purpose: it must not depend on the mirror it repairs.
+MIRROR_BOOTSTRAP_IMAGE: Final = (
+    "docker.io/library/python:3.13.14-slim@sha256:"
+    "9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
+)
+CRANE_URL: Final = (
+    "https://github.com/google/go-containerregistry/releases/download/"
+    "v0.22.1/go-containerregistry_Linux_x86_64.tar.gz"
+)
+CRANE_SHA256: Final = "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0"
+CRANE_INSTALL: Final = (
+    f"echo '{CRANE_SHA256}  /opt/crane.tar.gz' | sha256sum -c - "
+    "&& tar -xzf /opt/crane.tar.gz -C /usr/local/bin crane"
+)
+MIRROR_LOGIN: Final = (
+    'printf %s "$GITHUB_TOKEN" | crane auth login ghcr.io --username hseshadr --password-stdin'
+)
+MIRROR_COMMAND: Final = ("python3", "/mirror/image_mirror.py")
+MIRROR_MANIFEST: Final = "/mirror/images.json"
 MODULE_GATES: Final = (
     "modules/cloudflare-pages",
     "modules/portfolio-foundation",
@@ -113,6 +132,29 @@ class Ci:
         scan = self._repository().with_secret_variable("GITHUB_TOKEN", github_token)
         await scan.with_exec(command).sync()
         return "authoritative Dagger fleet policy passed"
+
+    @function
+    async def image_mirror(self, github_token: dagger.Secret) -> str:
+        """Copy every manifest image to the GHCR mirror by digest and prove each copy."""
+        tools = self._mirror_tools().with_secret_variable("GITHUB_TOKEN", github_token)
+        tools = tools.with_exec(["sh", "-c", MIRROR_LOGIN])
+        return await tools.with_exec([*MIRROR_COMMAND, "sync", MIRROR_MANIFEST]).stdout()
+
+    @function
+    async def image_mirror_verify(self) -> str:
+        """Read-only: prove every pinned upstream digest still resolves."""
+        tools = self._mirror_tools()
+        return await tools.with_exec([*MIRROR_COMMAND, "verify", MIRROR_MANIFEST]).stdout()
+
+    def _mirror_tools(self) -> dagger.Container:
+        base = dag.container(platform=dagger.Platform("linux/amd64"))
+        base = base.from_(MIRROR_BOOTSTRAP_IMAGE)
+        base = base.with_file("/opt/crane.tar.gz", dag.http(CRANE_URL))
+        base = base.with_exec(["sh", "-c", CRANE_INSTALL])
+        manifest = self.source.file("mirror/images.json")
+        script = self.source.file(".dagger/src/ci/image_mirror.py")
+        base = base.with_file(MIRROR_MANIFEST, manifest)
+        return base.with_file("/mirror/image_mirror.py", script)
 
     @function
     async def module_fixtures(self) -> str:
