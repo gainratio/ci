@@ -7,11 +7,13 @@ import pytest
 
 from ci.fleet_policy import (
     REQUIRED_MINIMUM,
+    CheckApp,
     CheckRun,
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
     PinAncestry,
+    PolicyFinding,
     Protection,
     RepositoryExpectation,
     RepositorySnapshot,
@@ -227,21 +229,25 @@ def _snapshot(
         modules=(SourceFile(path=module_path, text=module),),
         protection=protection,
         check_runs=(check,),
-        check_apps=("github-actions",),
+        check_apps=(CheckApp(slug="github-actions", app_id=15368),),
         codeql_default_state="not-configured",
         legacy_references=(),
         pin_ancestry=CURRENT_PINS,
     )
 
 
-def _codes(snapshot: RepositorySnapshot) -> tuple[str, ...]:
+def _findings(snapshot: RepositorySnapshot) -> tuple[PolicyFinding, ...]:
     expectation = RepositoryExpectation(
         name="example",
         required_contexts=("Dagger",),
         linear_history=True,
         conversation_resolution=True,
     )
-    return tuple(finding.code for finding in validate_repository(snapshot, expectation))
+    return tuple(validate_repository(snapshot, expectation))
+
+
+def _codes(snapshot: RepositorySnapshot) -> tuple[str, ...]:
+    return tuple(finding.code for finding in _findings(snapshot))
 
 
 def _shared_configs(source: str, *, engine: str = "v0.21.8") -> tuple[DaggerConfig, ...]:
@@ -479,7 +485,11 @@ def test_should_reject_managed_codeql_and_cloudflare_but_allow_gitguardian() -> 
     snapshot = replace(
         _snapshot(INGRESS),
         codeql_default_state="configured",
-        check_apps=("github-actions", "gitguardian", "cloudflare-pages"),
+        check_apps=(
+            CheckApp(slug="github-actions", app_id=15368),
+            CheckApp(slug="gitguardian", app_id=46505),
+            CheckApp(slug="cloudflare-pages", app_id=73295),
+        ),
     )
 
     # When independent control-plane ownership is evaluated
@@ -1856,3 +1866,40 @@ def test_should_report_no_python_syntax_finding_for_clean_module() -> None:
 
     # Then no syntax finding appears
     assert "python-syntax" not in codes
+
+
+def test_should_exempt_only_the_github_dependabot_config_check() -> None:
+    # Given GitHub's own Dependabot app (id 29110) validating an edited dependabot.yml
+    snapshot = replace(
+        _snapshot(INGRESS),
+        check_apps=(
+            CheckApp(slug="github-actions", app_id=15368),
+            CheckApp(slug="dependabot", app_id=29110),
+        ),
+    )
+
+    # When independent control-plane ownership is evaluated
+    codes = _codes(snapshot)
+
+    # Then config validation is not an independent execution app
+    assert "independent-check-app" not in codes
+
+
+@pytest.mark.parametrize(
+    "app",
+    [
+        CheckApp(slug="dependabot", app_id=999),
+        CheckApp(slug="dependabot-preview", app_id=29110),
+        CheckApp(slug="buildkite", app_id=12345),
+        CheckApp(slug="github-actions", app_id=1),
+    ],
+)
+def test_should_still_reject_look_alike_and_other_check_apps(app: CheckApp) -> None:
+    # Given a check app whose slug and id are not one exact reviewed identity
+    snapshot = replace(_snapshot(INGRESS), check_apps=(app,))
+
+    # When independent control-plane ownership is evaluated
+    findings = [item for item in _findings(snapshot) if item.code == "independent-check-app"]
+
+    # Then it is still an independent check app
+    assert [item.message for item in findings] == [f"{app.slug}#{app.app_id}"]

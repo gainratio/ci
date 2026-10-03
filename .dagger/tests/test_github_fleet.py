@@ -9,6 +9,7 @@ from urllib.request import Request
 
 import pytest
 
+from ci.fleet_policy import CheckApp
 from ci.github_fleet import (
     FleetAccessError,
     GitHubHttpTransport,
@@ -295,7 +296,7 @@ def test_should_parse_in_progress_checks_without_treating_them_as_green() -> Non
 
     # Then unfinished work cannot satisfy a green check, but its app remains observable
     assert all(run.name != "Dagger fleet policy" for run in snapshot.check_runs)
-    assert "untrusted-app" in snapshot.check_apps
+    assert CheckApp(slug="untrusted-app", app_id=999) in snapshot.check_apps
 
 
 def test_should_name_minimal_scope_when_protection_read_is_forbidden() -> None:

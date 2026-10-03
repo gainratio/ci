@@ -173,6 +173,14 @@ class RequiredCheck:
 
 
 @validated_dataclass(config=BOUNDARY_CONFIG)
+class CheckApp:
+    """One GitHub App identity observed on exact main: slug and numeric id together."""
+
+    slug: str
+    app_id: int
+
+
+@validated_dataclass(config=BOUNDARY_CONFIG)
 class CheckRun:
     """One exact-commit integration result."""
 
@@ -345,7 +353,7 @@ class RepositorySnapshot:
     modules: tuple[SourceFile, ...]
     protection: Protection
     check_runs: tuple[CheckRun, ...]
-    check_apps: tuple[str, ...]
+    check_apps: tuple[CheckApp, ...]
     codeql_default_state: str
     legacy_references: tuple[str, ...]
     dagger_configs: tuple[DaggerConfig, ...] = Field(default_factory=tuple)
@@ -1949,15 +1957,35 @@ def validate_control_plane(snapshot: RepositorySnapshot) -> tuple[PolicyFinding,
     findings: list[PolicyFinding] = []
     if snapshot.codeql_default_state == "configured":
         findings.append(finding("managed-codeql", snapshot.name, "default setup is configured"))
-    external = tuple(app for app in snapshot.check_apps if app not in allowed_check_apps())
-    if external:
-        findings.append(finding("independent-check-app", snapshot.name, ", ".join(external)))
+    findings.extend(independent_check_apps(snapshot))
     return tuple(findings)
 
 
-def allowed_check_apps() -> frozenset[str]:
-    """Return execution ownership plus the reviewed advisory-only integration."""
-    return frozenset(("github-actions", "gitguardian"))
+def independent_check_apps(snapshot: RepositorySnapshot) -> tuple[PolicyFinding, ...]:
+    """Report every observed app identity outside the reviewed allow-list."""
+    external = tuple(app for app in snapshot.check_apps if app not in allowed_check_apps())
+    if not external:
+        return ()
+    detail = ", ".join(f"{app.slug}#{app.app_id}" for app in external)
+    return (finding("independent-check-app", snapshot.name, detail),)
+
+
+def allowed_check_apps() -> frozenset[CheckApp]:
+    """Return execution ownership plus the reviewed non-executing integrations.
+
+    Each entry is an exact (slug, app id) identity, so a look-alike app cannot borrow
+    a name. GitGuardian is advisory secret scanning. Dependabot (GitHub's own app,
+    id 29110) adds a config-validation check to any commit that edits
+    .github/dependabot.yml; it never builds or deploys, so it is not an independent
+    execution app controlling the build or deploy path (docs/ARCHITECTURE.md).
+    """
+    return frozenset(
+        (
+            CheckApp(slug="github-actions", app_id=APP_ID),
+            CheckApp(slug="gitguardian", app_id=46505),
+            CheckApp(slug="dependabot", app_id=29110),
+        )
+    )
 
 
 def required_minimum_pins(configs: tuple[DaggerConfig, ...]) -> tuple[tuple[str, str], ...]:

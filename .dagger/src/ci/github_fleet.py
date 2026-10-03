@@ -16,6 +16,7 @@ from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 from pydantic.dataclasses import dataclass as validated_dataclass
 
 from ci.fleet_policy import (
+    CheckApp,
     CheckRun,
     DaggerConfig,
     DaggerDependency,
@@ -168,7 +169,7 @@ class SnapshotProjection:
     workflows: tuple[SourceFile, ...]
     modules: tuple[SourceFile, ...]
     runs: tuple[CheckRun, ...]
-    apps: tuple[str, ...]
+    apps: tuple[CheckApp, ...]
     legacy_references: tuple[str, ...]
 
 
@@ -880,9 +881,10 @@ def build_check_runs(checks: CheckRunsPayload) -> tuple[CheckRun, ...]:
     return tuple(to_check_run(item) for item in checks.check_runs if item.conclusion is not None)
 
 
-def build_check_apps(checks: CheckRunsPayload) -> tuple[str, ...]:
-    """Return the distinct check applications observed on exact main."""
-    return tuple(sorted({item.app.slug for item in checks.check_runs}))
+def build_check_apps(checks: CheckRunsPayload) -> tuple[CheckApp, ...]:
+    """Return the distinct check application identities observed on exact main."""
+    identities = sorted({(item.app.slug, item.app.id) for item in checks.check_runs})
+    return tuple(CheckApp(slug=slug, app_id=app_id) for slug, app_id in identities)
 
 
 def to_check_run(payload: CheckPayload) -> CheckRun:
