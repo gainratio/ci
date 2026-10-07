@@ -12,7 +12,7 @@ from .artifact import (
     verify_envelope_directory,
 )
 from .change_scope import classify_docs_only
-from .github import CheckEvidence, resolve_green_main
+from .github import CheckEvidence, GreenMainDecision, decide_green_main, resolve_green_main
 from .guard import build_guard
 from .identity import CommitIdentity, FullSha, RepositoryRef
 from .lineage import LineageRequest, release_lineage, release_provenance
@@ -92,6 +92,18 @@ class PortfolioFoundation:
     async def green_main(self, github_token: dagger.Secret, repository: str) -> CheckEvidence:
         """Resolve exact-green main evidence using a typed secret."""
         return await resolve_green_main(github_token, RepositoryRef.parse(repository))
+
+    @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
+    async def green_main_decision(
+        self, github_token: dagger.Secret, repository: str, commit_sha: str
+    ) -> GreenMainDecision:
+        """Deploy commit_sha only if it is main's exact-green HEAD; skip it if main moved on.
+
+        A deploy triggered for an older commit gets action "skip" (exit success, no
+        evidence) so it can never overwrite the newer commit's deploy. A HEAD commit
+        without a green Dagger attempt still fails closed.
+        """
+        return await decide_green_main(github_token, RepositoryRef.parse(repository), commit_sha)
 
     @function(cache="never")  # type: ignore[call-overload,untyped-decorator]  # SDK stub gap
     async def release_lineage(

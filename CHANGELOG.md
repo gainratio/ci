@@ -4,6 +4,15 @@
 
 ### Added
 
+- `portfolio-foundation` gains `green-main-decision --commit-sha=<sha>` for deploy workflows
+  that run after the Dagger workflow. It answers for the commit the deploy was started for,
+  not for whatever main is now. Main's HEAD with a green Dagger attempt: `action: deploy`
+  with the same evidence as `green-main`. A commit main has moved past: `action: skip`,
+  no evidence, message `superseded by <sha> on main; the newer commit's deploy will ship it`.
+  HEAD with a red, running or missing Dagger attempt still fails. Before this, an older
+  commit's deploy failed red ("applicable Dagger check count is outside bounds") once a
+  newer commit landed, because `green-main` reads main's current HEAD. `green-main` is
+  unchanged.
 - GHCR image mirror. `mirror/images.json` lists every upstream image the shared modules pin,
   plus the Dagger engine, each by digest. `image-mirror.yml` copies them with a
   checksum-pinned `crane` (v0.22.1) to `ghcr.io/hseshadr/mirror/<upstream host>/<path>` on

@@ -24,6 +24,8 @@ API_VERSION: Final = "2022-11-28"
 APP_ID: Final = 15368
 CHECK_NAME: Final = "Dagger"
 DEFAULT_BRANCH: Final = "main"
+DEPLOY_ACTION: Final = "deploy"
+SKIP_ACTION: Final = "skip"
 MAX_PAGES: Final = 10
 MAX_RETRIES: Final = 3
 # GitHub stamps a rerun attempt's created_at up to a second after its run_started_at
@@ -276,6 +278,30 @@ class CheckEvidence:
             "workflow_started_at": self.workflow_started_at,
             "workflow_updated_at": self.workflow_updated_at,
         }
+
+
+@object_type
+class GreenMainDecision:
+    """Deploy-or-skip verdict for one requested commit; evidence exists only for main HEAD."""
+
+    action: str = field()
+    commit_sha: str = field()
+    main_sha: str = field()
+    message: str = field()
+    evidence: CheckEvidence | None = field()
+
+    @function
+    def serialization(self) -> str:
+        """Return one canonical serialization; read it once, the call is uncached."""
+        evidence = None if self.evidence is None else json.loads(self.evidence.serialization())
+        payload = {
+            "action": self.action,
+            "commit_sha": self.commit_sha,
+            "evidence": evidence,
+            "main_sha": self.main_sha,
+            "message": self.message,
+        }
+        return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
 @dataclass(frozen=True)
@@ -620,11 +646,79 @@ async def resolve_green_main_from_api(api: GitHubApi, repository: RepositoryRef)
     """Apply deterministic exact-green policy to a read-only API adapter."""
     await _repository(api, repository)
     commit_sha = await _main_sha(api, repository)
-    checks = await _check_runs(api, repository, commit_sha)
-    contexts = await _attempt_contexts(api, repository, checks, commit_sha)
-    context = _authoritative_context(contexts, commit_sha)
+    context = await _green_context(api, repository, commit_sha)
     _require_stable_main(commit_sha, await _main_sha(api, repository))
     return _evidence(repository, commit_sha, context)
+
+
+async def decide_green_main(
+    github_token: dagger.Secret, repository: RepositoryRef, commit_sha: str
+) -> GreenMainDecision:
+    """Decide deploy-or-skip for one requested commit using only a typed GitHub secret."""
+    requested = _requested_sha(commit_sha)
+    try:
+        token = await github_token.plaintext()
+    except dagger.QueryError:
+        raise GitHubCredentialError from None
+    if not token:
+        raise GitHubCredentialError
+    return await decide_green_main_from_api(_GitHubRestApi(token), repository, requested)
+
+
+async def decide_green_main_from_api(
+    api: GitHubApi, repository: RepositoryRef, commit_sha: str
+) -> GreenMainDecision:
+    """Deploy only main's exact-green HEAD; a commit main moved past is a skip, never a deploy."""
+    # The newer commit's own deploy ships main, so an older deploy can never overwrite it.
+    requested = _requested_sha(commit_sha)
+    await _repository(api, repository)
+    head = await _main_sha(api, repository)
+    if head != requested:
+        return _superseded(requested, head)
+    context = await _green_context(api, repository, head)
+    after = await _main_sha(api, repository)
+    if after != requested:
+        return _superseded(requested, after)
+    return _deploy(requested, _evidence(repository, requested, context))
+
+
+def _requested_sha(commit_sha: str) -> str:
+    try:
+        return FullSha(commit_sha).value
+    except ValueError:
+        raise GitHubPolicyError("requested commit is not a full SHA") from None
+
+
+def _superseded(requested: str, head: str) -> GreenMainDecision:
+    message = (
+        f"SKIP {requested}: superseded by {head} on main; the newer commit's deploy will ship it"
+    )
+    return _decision(SKIP_ACTION, requested, head, message, None)
+
+
+def _deploy(requested: str, evidence: CheckEvidence) -> GreenMainDecision:
+    message = f"DEPLOY {requested}: exact-green main HEAD"
+    return _decision(DEPLOY_ACTION, requested, requested, message, evidence)
+
+
+def _decision(
+    action: str, requested: str, head: str, message: str, evidence: CheckEvidence | None
+) -> GreenMainDecision:
+    decision = GreenMainDecision.__new__(GreenMainDecision)
+    decision.action = action
+    decision.commit_sha = requested
+    decision.main_sha = head
+    decision.message = message
+    decision.evidence = evidence
+    return decision
+
+
+async def _green_context(
+    api: GitHubApi, repository: RepositoryRef, commit_sha: str
+) -> _AttemptContext:
+    checks = await _check_runs(api, repository, commit_sha)
+    contexts = await _attempt_contexts(api, repository, checks, commit_sha)
+    return _authoritative_context(contexts, commit_sha)
 
 
 async def _repository(api: GitHubApi, expected: RepositoryRef) -> RepositoryPayload:
