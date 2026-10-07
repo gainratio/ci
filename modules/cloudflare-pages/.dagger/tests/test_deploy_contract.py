@@ -20,6 +20,7 @@ import cloudflare_pages.api as api_module
 import cloudflare_pages.main as main_module
 from cloudflare_pages.api import (
     CloudflarePolicyError,
+    CloudflareSupersededError,
     deploy_verified_artifact,
     preflight_provider,
     require_evidence_binding,
@@ -896,11 +897,105 @@ class FakeGreenEvidence:
 @dataclass
 class FakeFoundation:
     value: str
-    calls: list[tuple[object, str]] = field(default_factory=list)
+    calls: list[tuple[object, str, str]] = field(default_factory=list)
 
-    def green_main(self, github_token: object, repository: str) -> FakeGreenEvidence:
-        self.calls.append((github_token, repository))
+    def green_main_decision(
+        self, github_token: object, repository: str, commit_sha: str
+    ) -> FakeGreenEvidence:
+        self.calls.append((github_token, repository, commit_sha))
         return FakeGreenEvidence(self.value)
+
+
+NEWER_SHA = "c" * 40
+SUPERSEDED_MESSAGE = f"SKIP {FULL_SHA}: superseded by {NEWER_SHA} on main"
+
+
+def _deploy_decision(**changes: object) -> str:
+    payload: dict[str, object] = {
+        "action": "deploy",
+        "commit_sha": FULL_SHA,
+        "main_sha": FULL_SHA,
+        "message": f"DEPLOY {FULL_SHA}: exact-green main HEAD",
+        "evidence": json.loads(_github_evidence().model_dump_json()),
+    }
+    payload.update(changes)
+    return json.dumps(payload)
+
+
+def _skip_decision(**changes: object) -> str:
+    base = {"action": "skip", "main_sha": NEWER_SHA, "message": SUPERSEDED_MESSAGE}
+    return _deploy_decision(**({"evidence": None} | base | changes))
+
+
+def _edge_inputs() -> main_module.TargetInputs:
+    return main_module.TargetInputs(
+        "hseshadr/edge-reco", "edge-reco", "main", "edge-reco.com", "dist", ()
+    )
+
+
+@pytest.mark.asyncio
+async def test_should_refuse_superseded_commit_with_named_newer_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: main moved past the envelope's commit while it was being built.
+    foundation = FakeFoundation(_skip_decision())
+    monkeypatch.setattr(main_module, "dag", FakeEvidenceDag(foundation))
+    token = cast(dagger.Secret, object())
+
+    # When / Then: refused before any provider call, with a stable marker.
+    with pytest.raises(CloudflareSupersededError) as raised:
+        await main_module._provider_context(token, "44", 2, _edge_inputs(), FULL_SHA)
+    assert str(raised.value) == (
+        f"superseded: {FULL_SHA} is no longer main HEAD ({NEWER_SHA}); "
+        "the newer commit's deploy will ship it"
+    )
+    assert isinstance(raised.value, CloudflarePolicyError)
+    assert foundation.calls == [(token, "hseshadr/edge-reco", FULL_SHA)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "decision",
+    (
+        _deploy_decision(commit_sha=NEWER_SHA, main_sha=NEWER_SHA),
+        _deploy_decision(main_sha=NEWER_SHA),
+        _deploy_decision(evidence=None),
+        _deploy_decision(action="proceed"),
+        _skip_decision(main_sha=FULL_SHA),
+        _skip_decision(evidence=json.loads(_github_evidence().model_dump_json())),
+        "not json",
+    ),
+)
+async def test_should_reject_inconsistent_foundation_decisions(
+    monkeypatch: pytest.MonkeyPatch, decision: str
+) -> None:
+    monkeypatch.setattr(main_module, "dag", FakeEvidenceDag(FakeFoundation(decision)))
+    token = cast(dagger.Secret, object())
+    with pytest.raises(CloudflarePolicyError) as raised:
+        await main_module._provider_context(token, "44", 2, _edge_inputs(), FULL_SHA)
+    assert not isinstance(raised.value, CloudflareSupersededError)
+
+
+@pytest.mark.asyncio
+async def test_should_reject_deploy_evidence_for_a_different_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = json.loads(_github_evidence().model_dump_json()) | {"commit_sha": NEWER_SHA}
+    monkeypatch.setattr(
+        main_module, "dag", FakeEvidenceDag(FakeFoundation(_deploy_decision(evidence=evidence)))
+    )
+    token = cast(dagger.Secret, object())
+    with pytest.raises(CloudflarePolicyError, match="decision differs"):
+        await main_module._provider_context(token, "44", 2, _edge_inputs(), FULL_SHA)
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    ("foreign", f"hseshadr/other@{FULL_SHA}", "hseshadr/edge-reco@abc", "hseshadr/edge-reco@"),
+)
+def test_should_parse_consumer_commit_only_from_exact_repository_identity(consumer: str) -> None:
+    with pytest.raises(CloudflarePolicyError, match="Envelope source identity"):
+        main_module._consumer_commit(consumer, "hseshadr/edge-reco")
 
 
 @dataclass(frozen=True)
@@ -923,14 +1018,11 @@ def test_should_bind_foundation_evidence_to_explicit_attempt() -> None:
 async def test_should_obtain_exact_green_from_local_foundation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    foundation = FakeFoundation(_github_evidence().model_dump_json())
+    foundation = FakeFoundation(_deploy_decision())
     monkeypatch.setattr(main_module, "dag", FakeEvidenceDag(foundation))
     token = cast(dagger.Secret, object())
-    inputs = main_module.TargetInputs(
-        "hseshadr/edge-reco", "edge-reco", "main", "edge-reco.com", "dist", ()
-    )
-    context = await main_module._provider_context(token, "44", 2, inputs)
-    assert foundation.calls == [(token, "hseshadr/edge-reco")]
+    context = await main_module._provider_context(token, "44", 2, _edge_inputs(), FULL_SHA)
+    assert foundation.calls == [(token, "hseshadr/edge-reco", FULL_SHA)]
     assert context.github.commit_sha == FULL_SHA
 
 

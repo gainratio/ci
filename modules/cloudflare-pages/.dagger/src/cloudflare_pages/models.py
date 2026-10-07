@@ -374,3 +374,13 @@ def _require_target_binding(repository: RepositoryIdentity, project: str, branch
     branch_valid = BRANCH_PATTERN.fullmatch(branch) is not None
     if not project_valid or not branch_valid or repository.name != project:
         raise ValueError("target binding must match repository, project, and branch")
+
+
+class GreenMainDecision(ClosedModel):  # type: ignore[explicit-any]  # Pydantic v2 base stub
+    """Foundation's deploy-or-skip verdict for one requested commit."""
+
+    action: Literal["deploy", "skip"]
+    commit_sha: str = Field(pattern=FULL_SHA_TEXT)
+    main_sha: str = Field(pattern=FULL_SHA_TEXT)
+    message: str = Field(min_length=1)
+    evidence: GitHubEvidence | None
