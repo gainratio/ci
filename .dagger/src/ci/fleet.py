@@ -5,10 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from ci.fleet_coverage import coverage_results
-from ci.fleet_policy import PolicyFinding, RepositoryExpectation, finding, validate_repository
+from ci.fleet_coverage import owners_coverage_results
+from ci.fleet_policy import (
+    ALLOWED_OWNERS,
+    PolicyFinding,
+    RepositoryExpectation,
+    finding,
+    validate_repository,
+)
 from ci.github_fleet import FleetAccessError, GitHubHttpTransport, GitHubTransport, read_repository
 
+# Reviewed repositories are read under hseshadr; after a transfer GitHub's API redirects the
+# old path. Coverage discovery lists both allowed owners so a moved consumer stays in view.
 OWNER = "hseshadr"
 
 
@@ -77,7 +85,7 @@ def scan_fleet_with(
 ) -> tuple[RepositoryResult, ...]:
     """Prove coverage of every discovered consumer, then evaluate each reviewed one."""
     reviewed = tuple(item.name for item in repository_expectations(True))
-    uncovered = coverage_results(transport, OWNER, reviewed)
+    uncovered = owners_coverage_results(transport, ALLOWED_OWNERS, reviewed)
     coverage = tuple(RepositoryResult(item.name, "", item.findings) for item in uncovered)
     expectations = repository_expectations(include_central)
     return coverage + tuple(scan_repository(transport, item) for item in expectations)

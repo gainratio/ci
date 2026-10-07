@@ -21,6 +21,7 @@ from ci.fleet_coverage import (
     UNCOVERED_CODE,
     coverage_results,
     discover_consumers,
+    owners_coverage_results,
     uncovered_consumers,
 )
 from ci.github_fleet import FleetAccessError, HttpResponse
@@ -29,6 +30,7 @@ OWNER = "hseshadr"
 CI_SOURCE = "github.com/hseshadr/ci/modules/portfolio-foundation@" + "a" * 40
 OTHER_SOURCE = "github.com/dagger/dagger/modules/wolfi@" + "b" * 40
 LISTING = "users/hseshadr/repos?type=owner&per_page=100&page={page}"
+ORG_LISTING = "orgs/gainratio/repos?type=all&per_page=100&page={page}"
 
 # The live 2026-09-25 scan's exact set of hseshadr repos whose default-branch
 # dagger.json references github.com/hseshadr/ci. A new consumer must be added here
@@ -202,6 +204,7 @@ def test_should_fail_hosted_scan_for_uncovered_consumer_before_reviewed_reposito
         LISTING.format(page=1): _json([_repo("newcomer"), _repo("assay")]),
         _config_path("newcomer"): _config("newcomer", CI_SOURCE),
         _config_path("assay"): _config("assay", CI_SOURCE),
+        ORG_LISTING.format(page=1): _json([]),
     }
 
     # When the whole fleet scan runs (reviewed repositories are unreadable here)
@@ -252,3 +255,114 @@ def test_should_scan_hosted_fleet_through_authenticated_transport(
 
     # Then the real GitHub transport performs discovery and every repository read
     assert seen == [("GitHubHttpTransport", True)]
+
+
+def _org_config_path(name: str) -> str:
+    return f"repos/gainratio/{name}/contents/dagger.json?ref=main"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "github.com/gainratio/ci/modules/portfolio-foundation@" + "a" * 40,
+        "github.com/gainratio/ci@" + "a" * 40,
+        CI_SOURCE,
+    ],
+)
+def test_should_discover_gainratio_org_consumer_pinning_either_central_owner(source: str) -> None:
+    # Given a repository already moved to the gainratio org, pinning central ci under either owner
+    responses = {
+        ORG_LISTING.format(page=1): _json([_repo("moved")]),
+        _org_config_path("moved"): _config("moved", source),
+    }
+
+    # When the org is scanned through the org listing endpoint
+    discovered = discover_consumers(FakeTransport(responses), "gainratio")
+
+    # Then the moved consumer is still discovered
+    assert discovered == ("moved",)
+
+
+@pytest.mark.parametrize("owner", ["attacker", "gainratio-evil", "hseshadrx"])
+def test_should_not_count_a_third_owner_ci_pin_as_central(owner: str) -> None:
+    # Given a repository pinning a lookalike owner's ci module
+    source = f"github.com/{owner}/ci/modules/portfolio-foundation@" + "a" * 40
+    responses = {
+        LISTING.format(page=1): _json([_repo("lookalike")]),
+        _config_path("lookalike"): _config("lookalike", source),
+    }
+
+    # Then it is not a central consumer
+    assert discover_consumers(FakeTransport(responses), OWNER) == ()
+
+
+@pytest.mark.parametrize("owner", ["attacker", "gainratio-evil", "hseshadrx", "Gainratio"])
+def test_should_refuse_to_scan_an_owner_outside_the_allow_list(owner: str) -> None:
+    # Given an owner that is not one of the two reviewed owners
+    # Then discovery refuses instead of guessing a listing endpoint
+    with pytest.raises(ValueError, match="not an allowed fleet owner"):
+        discover_consumers(FakeTransport({}), owner)
+
+
+def test_should_scan_both_owners_and_accept_an_empty_org() -> None:
+    # Given hseshadr has an uncovered consumer and the gainratio org has no repositories yet
+    responses = {
+        LISTING.format(page=1): _json([_repo("newcomer")]),
+        _config_path("newcomer"): _config("newcomer", CI_SOURCE),
+        ORG_LISTING.format(page=1): _json([]),
+    }
+
+    # When coverage runs across both owners
+    results = owners_coverage_results(FakeTransport(responses), ("hseshadr", "gainratio"), ())
+
+    # Then the empty org adds nothing and the uncovered consumer is still reported
+    assert [(item.name, [f.code for f in item.findings]) for item in results] == [
+        ("newcomer", [UNCOVERED_CODE])
+    ]
+
+
+def test_should_report_uncovered_consumer_found_only_in_the_org() -> None:
+    # Given a moved repository the reviewed contract does not name
+    responses = {
+        LISTING.format(page=1): _json([]),
+        ORG_LISTING.format(page=1): _json([_repo("moved")]),
+        _org_config_path("moved"): _config("moved", CI_SOURCE),
+    }
+
+    # When coverage runs across both owners
+    results = owners_coverage_results(FakeTransport(responses), ("hseshadr", "gainratio"), ())
+
+    # Then it is reported, so a transfer cannot hide a consumer from the fleet scan
+    assert [item.name for item in results] == ["moved"]
+
+
+def test_should_fail_closed_without_crashing_when_org_listing_is_missing() -> None:
+    # Given the hseshadr listing is readable but the gainratio org listing 404s
+    responses = {LISTING.format(page=1): _json([])}
+
+    # When coverage runs across both owners
+    results = owners_coverage_results(FakeTransport(responses), ("hseshadr", "gainratio"), ())
+
+    # Then the scan reports an unreadable-evidence finding for the org instead of raising
+    assert [(item.name, [f.code for f in item.findings]) for item in results] == [
+        ("gainratio", ["evidence-unreadable"])
+    ]
+    assert "404" in results[0].findings[0].message
+
+
+def test_should_fail_hosted_scan_for_consumer_that_moved_to_the_org() -> None:
+    # Given an unreviewed consumer that exists only in the gainratio org
+    responses = {
+        LISTING.format(page=1): _json([]),
+        ORG_LISTING.format(page=1): _json([_repo("moved")]),
+        _org_config_path("moved"): _config("moved", CI_SOURCE),
+    }
+
+    # When the whole fleet scan runs
+    results = scan_fleet_with(FakeTransport(responses), include_central=False)
+
+    # Then the hosted scan reports it before the reviewed repositories
+    assert (results[0].name, [item.code for item in results[0].findings]) == (
+        "moved",
+        [UNCOVERED_CODE],
+    )

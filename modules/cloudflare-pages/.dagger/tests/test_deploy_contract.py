@@ -2328,12 +2328,35 @@ def test_should_expose_pages_functions_as_one_default_false_option() -> None:
         if isinstance(node, ast.AsyncFunctionDef) and node.name in {"preflight", "deploy", "verify"}
     ]
 
+    assert len(methods) == 3
     for method in methods:
-        names = [argument.arg for argument in method.args.args]
-        assert names[-1] == "pages_functions"
-        default = method.args.defaults[-1]
-        assert isinstance(default, ast.Constant)
-        assert default.value is False
+        assert _optional_arguments(method) == {"pages_functions": False, "git_source_owner": ""}
+
+
+def _optional_arguments(method: ast.AsyncFunctionDef) -> dict[str, object]:
+    """Map each trailing defaulted argument to its literal default."""
+    names = [argument.arg for argument in method.args.args]
+    defaults = method.args.defaults
+    trailing = names[len(names) - len(defaults) :]
+    values = [default.value for default in defaults if isinstance(default, ast.Constant)]
+    assert len(values) == len(defaults)
+    return dict(zip(trailing, values, strict=True))
+
+
+def test_should_expose_git_source_owner_as_one_default_empty_option() -> None:
+    # Given the three target-building public functions
+    tree = ast.parse(MAIN.read_text())
+    methods = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name in {"preflight", "deploy", "verify"}
+    ]
+
+    # Then each exposes git_source_owner last, as a string defaulting to the target owner ("")
+    for method in methods:
+        last = method.args.args[-1]
+        assert last.arg == "git_source_owner"
+        assert isinstance(last.annotation, ast.Name) and last.annotation.id == "str"
 
 
 def test_should_verify_envelope_before_internal_green_main() -> None:

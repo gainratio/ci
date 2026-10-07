@@ -463,7 +463,7 @@ def _one_matching_deployment(
 
 
 def _require_source_binding(owner: str, repository: str, target: PagesTarget) -> None:
-    expected = (target.repository.owner, target.repository.name)
+    expected = (target.git_source_owner, target.repository.name)
     if (owner, repository) != expected:
         raise CloudflarePolicyError("Cloudflare project target binding differs")
 
