@@ -35,9 +35,12 @@ from portfolio_foundation.github import (
     GitHubNetworkError,
     GitHubPolicyError,
     GitHubResponseError,
+    GreenMainDecision,
     HttpPage,
     RepositoryPayload,
     WorkflowRunPayload,
+    decide_green_main,
+    decide_green_main_from_api,
     parse_branch_response,
     parse_check_runs_response,
     parse_repository_response,
@@ -1003,6 +1006,161 @@ def test_should_declare_supported_pydantic_v2_dependency() -> None:
 
     # Then
     assert "pydantic>=2.11,<3" in dependencies
+
+
+class RecordingApi:
+    """Wrap a fake API and record every target the policy reads."""
+
+    def __init__(self, inner: FakeApi) -> None:
+        self._inner = inner
+        self.targets: list[ApiTarget] = []
+
+    async def get(self, target: ApiTarget) -> HttpPage:
+        self.targets.append(target)
+        return await self._inner.get(target)
+
+
+NEWER = "b" * 40
+OLDER = "c" * 40
+
+
+def _decide(api: FakeApi | RecordingApi, requested: str = SHA) -> GreenMainDecision:
+    return asyncio.run(decide_green_main_from_api(api, REPOSITORY, requested))
+
+
+def _moving_main_api(after: str) -> FakeApi:
+    branch_target = _targets()[1]
+    api = _api()
+    original_get = api.get
+    samples = iter((HttpPage(_branch_payload()), HttpPage(_branch_payload(commit={"sha": after}))))
+
+    async def moving_get(target: ApiTarget) -> HttpPage:
+        return next(samples) if target == branch_target else await original_get(target)
+
+    api.get = moving_get  # type: ignore[method-assign]
+    return api
+
+
+def test_should_deploy_requested_commit_when_it_is_green_main_head() -> None:
+    # Given / When
+    decision = _decide(_api())
+
+    # Then
+    assert decision.action == "deploy"
+    assert decision.commit_sha == decision.main_sha == SHA
+    assert decision.evidence is not None
+    assert decision.evidence.commit_sha == SHA
+    serialized = json.loads(decision.serialization())
+    assert serialized["action"] == "deploy"
+    assert serialized["evidence"]["commit_sha"] == SHA
+    assert serialized["evidence"]["workflow_run_id"] == str(RUN_ID)
+
+
+@pytest.mark.parametrize("conclusion", ("failure", "cancelled", None))
+def test_should_fail_when_main_head_dagger_attempt_is_not_green(conclusion: str | None) -> None:
+    # Given
+    status = "in_progress" if conclusion is None else "completed"
+    checks = _checks_payload(_check_payload(status=status, conclusion=conclusion))
+
+    # When / Then
+    with pytest.raises(GitHubPolicyError):
+        _decide(_api(ApiOverrides(checks=checks)))
+
+
+def test_should_fail_when_main_head_has_no_dagger_check() -> None:
+    # Given
+    api = _api(ApiOverrides(checks=_checks_payload()))
+
+    # When / Then
+    with pytest.raises(GitHubPolicyError, match="outside bounds"):
+        _decide(api)
+
+
+def test_should_skip_without_reading_checks_when_requested_commit_is_superseded() -> None:
+    # Given: main HEAD is NEWER, the deploy asks for the older SHA.
+    api = RecordingApi(_api(ApiOverrides(branch=_branch_payload(commit={"sha": NEWER}))))
+
+    # When
+    decision = _decide(api, SHA)
+
+    # Then
+    assert decision.action == "skip"
+    assert decision.commit_sha == SHA
+    assert decision.main_sha == NEWER
+    assert decision.evidence is None
+    assert f"superseded by {NEWER}" in decision.message
+    assert "newer commit's deploy will ship it" in decision.message
+    assert not any("/check-runs" in target.value for target in api.targets)
+    serialized = json.loads(decision.serialization())
+    assert serialized == {
+        "action": "skip",
+        "commit_sha": SHA,
+        "evidence": None,
+        "main_sha": NEWER,
+        "message": decision.message,
+    }
+
+
+def test_should_skip_when_main_moves_off_requested_commit_during_resolution() -> None:
+    # Given / When
+    decision = _decide(_moving_main_api(NEWER))
+
+    # Then
+    assert decision.action == "skip"
+    assert decision.main_sha == NEWER
+    assert decision.evidence is None
+
+
+def test_should_reject_malformed_requested_commit_before_provider_reads() -> None:
+    # Given
+    api = RecordingApi(_api())
+
+    # When / Then
+    with pytest.raises(GitHubPolicyError, match="requested commit"):
+        _decide(api, "abc")
+    assert api.targets == []
+
+
+@pytest.mark.parametrize("main_head", (NEWER, OLDER))
+@pytest.mark.parametrize("head_green", (True, False))
+def test_should_never_authorize_a_commit_other_than_main_head(
+    main_head: str, head_green: bool
+) -> None:
+    # Given: whatever main's HEAD and its Dagger state, the deploy asks for SHA.
+    checks = None if head_green else _checks_payload(_check_payload(conclusion="failure"))
+    branch = _branch_payload(commit={"sha": main_head})
+    api = _api(ApiOverrides(branch=branch, checks=checks))
+
+    # When
+    decision = _decide(api, SHA)
+
+    # Then: no deployable evidence can exist for a non-HEAD commit.
+    assert decision.action == "skip"
+    assert decision.evidence is None
+    assert json.loads(decision.serialization())["evidence"] is None
+
+
+def test_should_bind_deploy_evidence_to_the_requested_head_commit_only() -> None:
+    # Given / When
+    decision = _decide(_api())
+
+    # Then: the only deployable decision names the requested SHA everywhere.
+    assert decision.evidence is not None
+    identities = {decision.commit_sha, decision.main_sha, decision.evidence.commit_sha}
+    assert identities == {SHA}
+
+
+def test_should_decide_through_typed_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given
+    monkeypatch.setattr(github_module, "_GitHubRestApi", lambda _: _api())
+    secret = cast(dagger.Secret, FakeSecret("private-value"))
+
+    # When
+    decision = asyncio.run(decide_green_main(secret, REPOSITORY, SHA))
+
+    # Then
+    assert decision.action == "deploy"
+    assert "private-value" not in str(decision.serialization())
 
 
 @pytest.mark.skipif(os.environ.get("RUN_LIVE_GITHUB") != "1", reason="explicit live test")

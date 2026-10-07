@@ -61,6 +61,11 @@ EXPECTED_PUBLIC_SCHEMA: tuple[PublicSignature, ...] = (
         "CheckEvidence",
     ),
     (
+        "green_main_decision",
+        (("github_token", "dagger.Secret"), ("repository", "str"), ("commit_sha", "str")),
+        "GreenMainDecision",
+    ),
+    (
         "release_lineage",
         (
             ("github_token", "dagger.Secret"),
@@ -190,5 +195,16 @@ def test_should_disable_cache_for_current_github_evidence() -> None:
     green_main = next(node for node in _public_methods(_main_tree()) if node.name == "green_main")
     decorator = next(node for node in green_main.decorator_list if isinstance(node, ast.Call))
     cache = next(keyword.value for keyword in decorator.keywords if keyword.arg == "cache")
+    assert isinstance(cache, ast.Constant)
+    assert cache.value == "never"
+
+
+def test_should_disable_cache_for_deploy_or_skip_decision() -> None:
+    decision = next(
+        node for node in _public_methods(_main_tree()) if node.name == "green_main_decision"
+    )
+    assert isinstance(decision, ast.AsyncFunctionDef)
+    call = next(node for node in decision.decorator_list if isinstance(node, ast.Call))
+    cache = next(keyword.value for keyword in call.keywords if keyword.arg == "cache")
     assert isinstance(cache, ast.Constant)
     assert cache.value == "never"

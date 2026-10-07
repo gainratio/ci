@@ -68,6 +68,7 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
    Name              Description
    envelope          Wrap a typed artifact with deterministic evidence.
    green-main        Resolve exact-green main evidence using a typed secret.
+   green-main-decision Deploy commit_sha only if it is main's exact-green HEAD; skip it if main moved on.
    guard             Apply repository security checks to a bound source.
    source            Bind a supplied workspace to a repository identity.
    verify-envelope   Revalidate and return only a closed envelope's artifact subtree.
