@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from portfolio_foundation.guard import GITLEAKS_IMAGE
+from portfolio_foundation.guard import ACTIONLINT_IMAGE, GITLEAKS_IMAGE, actionlint_command
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,11 @@ FIXTURE_PATHS = (
     Path("backend/tests/test_predictive_golden.py"),
     Path("frontend/packages/browser/integration/parity.mjs"),
 )
+DEPOT_WORKFLOW = (
+    "on: push\njobs:\n  build:\n    runs-on: depot-ubuntu-24.04-4\n"
+    "    steps:\n      - run: echo ok\n"
+)
+DEPOT_CONFIG = "self-hosted-runner:\n  labels:\n    - depot-ubuntu-24.04-4\n"
 PAYLOAD_PARTS = (
     "616c6d616d6573682d7061726974792d",
     "666978747572652d7369676e65723030",
@@ -286,3 +291,42 @@ def test_should_reject_a_snapshot_copy_despite_historical_allowlist(tmp_path: Pa
 
     # Then
     _assert_two_generic_api_keys(result)
+
+
+def _depot_consumer(tmp_path: Path, *, config: bool) -> Path:
+    snapshot = tmp_path / "snapshot"
+    (snapshot / ".github" / "workflows").mkdir(parents=True)
+    (snapshot / ".github" / "workflows" / "ci.yml").write_text(DEPOT_WORKFLOW)
+    if config:
+        (snapshot / ".github" / "actionlint.yaml").write_text(DEPOT_CONFIG)
+    return snapshot
+
+
+def _actionlint(snapshot: Path) -> subprocess.CompletedProcess[str]:
+    docker = shutil.which("docker")
+    assert docker is not None, "Docker is required for the real actionlint contract"
+    mount = ("-v", f"{snapshot}:/snapshot:ro", "--entrypoint", "sh", ACTIONLINT_IMAGE)
+    return _run(docker, "run", "--rm", *mount, "-ceu", actionlint_command(), cwd=snapshot)
+
+
+def test_should_accept_self_hosted_label_declared_in_consumer_config(tmp_path: Path) -> None:
+    # Given
+    snapshot = _depot_consumer(tmp_path, config=True)
+
+    # When
+    result = _actionlint(snapshot)
+
+    # Then
+    assert result.returncode == 0, result.stdout
+
+
+def test_should_reject_unknown_self_hosted_label_without_consumer_config(tmp_path: Path) -> None:
+    # Given
+    snapshot = _depot_consumer(tmp_path, config=False)
+
+    # When
+    result = _actionlint(snapshot)
+
+    # Then
+    assert result.returncode != 0, "unknown runner label unexpectedly passed"
+    assert 'label "depot-ubuntu-24.04-4" is unknown' in result.stdout

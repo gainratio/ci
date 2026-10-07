@@ -2,6 +2,13 @@
 
 ## Unreleased — Dagger-only control plane
 
+### Fixed
+
+- The foundation guard now passes the consumer's `.github/actionlint.yaml` (or `.yml`) to
+  actionlint with `-config-file`. The guard lints a snapshot without `.git`, so actionlint never
+  found the config on its own and rejected declared self-hosted labels such as
+  `depot-ubuntu-24.04-4`. An undeclared label, or any label with no config, still fails.
+
 ### Added
 
 - Dual-owner prep for moving the public repos to the `gainratio` org. Fleet policy, fleet

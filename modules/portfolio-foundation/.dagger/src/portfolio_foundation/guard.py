@@ -21,16 +21,30 @@ ACTIONLINT_PATH: Final = "/usr/local/bin/actionlint"
 CANARY_EXIT_CODE: Final = 86
 
 
-def actionlint_command() -> str:
+SNAPSHOT_ROOT: Final = "/snapshot"
+
+
+def actionlint_command(root: str = SNAPSHOT_ROOT) -> str:
     """Return the closed workflow-file validation program."""
     patterns = r"\( -name '*.yml' -o -name '*.yaml' \)"
-    workflow_root = "/snapshot/.github/workflows"
+    workflow_root = f"{root}/.github/workflows"
     return "\n".join(
         (
             f"test -d {workflow_root}",
             f'test -n "$(find {workflow_root} -type f {patterns} -print -quit)"',
-            f"find {workflow_root} -type f {patterns} -exec actionlint {{}} +",
+            *_actionlint_config_commands(root),
+            f'find {workflow_root} -type f {patterns} -exec actionlint "$@" {{}} +',
         )
+    )
+
+
+def _actionlint_config_commands(root: str) -> tuple[str, ...]:
+    """Pass the consumer's actionlint config explicitly: the snapshot has no .git to find it."""
+    yaml, yml = (f"{root}/.github/actionlint.{extension}" for extension in ("yaml", "yml"))
+    return (
+        "set --",
+        f"if test -f {yaml}; then set -- -config-file {yaml};",
+        f"elif test -f {yml}; then set -- -config-file {yml}; fi",
     )
 
 
