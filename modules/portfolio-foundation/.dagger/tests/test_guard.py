@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import subprocess
+from pathlib import Path
 from typing import cast
 
 import dagger
@@ -87,6 +89,71 @@ def test_should_require_nonempty_workflow_input() -> None:
     # When / Then
     assert "test -n" in command
     assert command.index("test -n") < command.index("actionlint")
+
+
+FAKE_ACTIONLINT = '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$(dirname "$0")/argv"\n'
+WORKFLOW = (
+    "on: push\njobs:\n  build:\n    runs-on: depot-ubuntu-24.04-4\n    steps:\n      - run: true\n"
+)
+
+
+def _consumer(tmp_path: Path, config_name: str | None) -> Path:
+    root = tmp_path / "snapshot"
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "ci.yml").write_text(WORKFLOW)
+    if config_name is not None:
+        (root / ".github" / config_name).write_text("self-hosted-runner:\n  labels: [depot-*]\n")
+    return root
+
+
+def _run_actionlint_program(tmp_path: Path, root: Path) -> tuple[str, ...]:
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    fake = tools / "actionlint"
+    fake.write_text(FAKE_ACTIONLINT)
+    fake.chmod(0o755)
+    program = actionlint_command(str(root))
+    environment = {"PATH": f"{tools}:/usr/bin:/bin"}
+    subprocess.run(("/bin/sh", "-ceu", program), check=True, env=environment)  # noqa: S603
+    return tuple((tools / "argv").read_text().splitlines())
+
+
+@pytest.mark.parametrize("config_name", ["actionlint.yaml", "actionlint.yml"])
+def test_should_pass_consumer_actionlint_config_explicitly(
+    tmp_path: Path, config_name: str
+) -> None:
+    # Given
+    root = _consumer(tmp_path, config_name)
+
+    # When
+    argv = _run_actionlint_program(tmp_path, root)
+
+    # Then
+    config = str(root / ".github" / config_name)
+    assert argv == ("-config-file", config, str(root / ".github" / "workflows" / "ci.yml"))
+
+
+def test_should_prefer_yaml_config_when_both_extensions_exist(tmp_path: Path) -> None:
+    # Given
+    root = _consumer(tmp_path, "actionlint.yaml")
+    (root / ".github" / "actionlint.yml").write_text("self-hosted-runner:\n  labels: []\n")
+
+    # When
+    argv = _run_actionlint_program(tmp_path, root)
+
+    # Then
+    assert argv[:2] == ("-config-file", str(root / ".github" / "actionlint.yaml"))
+
+
+def test_should_run_actionlint_without_config_when_consumer_has_none(tmp_path: Path) -> None:
+    # Given
+    root = _consumer(tmp_path, None)
+
+    # When
+    argv = _run_actionlint_program(tmp_path, root)
+
+    # Then
+    assert argv == (str(root / ".github" / "workflows" / "ci.yml"),)
 
 
 def test_should_require_runtime_canary_detection_before_real_scan() -> None:
