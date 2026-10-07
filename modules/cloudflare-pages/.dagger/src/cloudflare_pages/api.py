@@ -51,6 +51,16 @@ class CloudflarePolicyError(CloudflareError):
     """Raised when provider state cannot authorize the requested delivery."""
 
 
+class CloudflareSupersededError(CloudflarePolicyError):
+    """Raised before any upload when main has moved past the envelope's commit."""
+
+    def __init__(self, commit_sha: str, main_sha: str) -> None:
+        super().__init__(
+            f"superseded: {commit_sha} is no longer main HEAD ({main_sha}); "
+            "the newer commit's deploy will ship it"
+        )
+
+
 class PagesOperations[ArtifactT](Protocol):
     """One-writer provider operations injected into deterministic policy."""
 

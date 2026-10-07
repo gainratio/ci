@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import posixpath
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -20,6 +21,7 @@ from .api import (
     CONTROL_PATTERN,
     CloudflareApiError,
     CloudflarePolicyError,
+    CloudflareSupersededError,
     deploy_verified_artifact,
     disable_git_payload,
     live_production_deployment,
@@ -35,6 +37,7 @@ from .models import (
     AttemptIdentity,
     CreatedDeployment,
     GitHubEvidence,
+    GreenMainDecision,
     ListedPagesDeployment,
     PagesTarget,
     ProviderDeploymentEvidence,
@@ -43,6 +46,7 @@ from .models import (
     WranglerOutput,
 )
 
+FULL_SHA_PATTERN: Final = re.compile(r"[0-9a-f]{40}")
 CURL_IMAGE: Final = (
     "ghcr.io/hseshadr/mirror/docker.io/curlimages/curl:8.16.0@sha256:"
     "463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
@@ -451,24 +455,54 @@ async def _verify(
 # fmt: on
 
 
+# fmt: off
 async def _provider_context(
-    github_token: dagger.Secret, workflow_run_id: str, run_attempt: int, inputs: TargetInputs
+    github_token: dagger.Secret, workflow_run_id: str, run_attempt: int,
+    inputs: TargetInputs, commit_sha: str,
 ) -> ProviderContext:
     target = _pages_target(inputs)
     attempt = AttemptIdentity(workflow_run_id, run_attempt)
-    github = await _green_evidence(github_token, inputs.repository)
+    github = await _green_evidence(github_token, inputs.repository, commit_sha)
     require_evidence_binding(target, github, attempt)
     return ProviderContext(target, github, attempt)
+# fmt: on
 
 
-async def _green_evidence(token: dagger.Secret, repository: str) -> GitHubEvidence:
-    value = (
-        await dag.foundation().green_main(github_token=token, repository=repository).serialization()
+async def _green_evidence(token: dagger.Secret, repository: str, commit_sha: str) -> GitHubEvidence:
+    """Authorize only main's exact-green HEAD; a commit main moved past is refused as superseded."""
+    foundation = dag.foundation()
+    call = foundation.green_main_decision(
+        github_token=token, repository=repository, commit_sha=commit_sha
     )
+    decision = _parse_decision(await call.serialization())
+    if decision.commit_sha != commit_sha:
+        raise CloudflarePolicyError("Foundation decision differs from the envelope commit")
+    if decision.action == "skip" and decision.evidence is None and decision.main_sha != commit_sha:
+        raise CloudflareSupersededError(commit_sha, decision.main_sha)
+    return _deploy_evidence(decision, commit_sha)
+
+
+def _parse_decision(value: str) -> GreenMainDecision:
     try:
-        return GitHubEvidence.model_validate_json(value)
+        return GreenMainDecision.model_validate_json(value)
     except ValidationError:
         raise CloudflarePolicyError("Foundation GitHub evidence schema differs") from None
+
+
+def _deploy_evidence(decision: GreenMainDecision, commit_sha: str) -> GitHubEvidence:
+    evidence = decision.evidence
+    exact = decision.action == "deploy" and decision.main_sha == commit_sha
+    if not exact or evidence is None or evidence.commit_sha != commit_sha:
+        raise CloudflarePolicyError("Foundation decision differs from exact-green main HEAD")
+    return evidence
+
+
+def _consumer_commit(consumer: str, repository: str) -> str:
+    prefix = f"{repository}@"
+    commit_sha = consumer.removeprefix(prefix)
+    if not consumer.startswith(prefix) or FULL_SHA_PATTERN.fullmatch(commit_sha) is None:
+        raise CloudflarePolicyError("Envelope source identity differs from GitHub evidence")
+    return commit_sha
 
 
 def _pages_target(inputs: TargetInputs) -> PagesTarget:
@@ -494,7 +528,9 @@ async def _verified_context(
     verified = await _verify_envelope(
         envelope, consumer_identity, producing_identity, allowed_roots)
     await _require_pages_functions_source(verified, target)
-    context = await _provider_context(github_token, workflow_run_id, run_attempt, inputs)
+    commit_sha = _consumer_commit(consumer_identity, inputs.repository)
+    context = await _provider_context(
+        github_token, workflow_run_id, run_attempt, inputs, commit_sha)
     _require_consumer_binding(consumer_identity, inputs.repository, context.github)
     artifact = verified if target.pages_functions else verified.directory(target.deploy_root)
     await artifact.digest()

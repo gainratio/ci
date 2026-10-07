@@ -4,6 +4,12 @@
 
 ### Added
 
+- `cloudflare-pages` `deploy`/`preflight`/`verify` now ask `green-main-decision` about the
+  envelope's own commit instead of `green-main`. If main moved past that commit while it was
+  being built, they raise `superseded: <sha> is no longer main HEAD (<head>); the newer
+  commit's deploy will ship it` before any upload, so a consumer can report a green skip.
+  main's HEAD still needs a green Dagger attempt. Seen live: almamesh 8c2f664 passed its own
+  check, then failed red at upload when #271 landed mid-build.
 - `portfolio-foundation` gains `green-main-decision --commit-sha=<sha>` for deploy workflows
   that run after the Dagger workflow. It answers for the commit the deploy was started for,
   not for whatever main is now. Main's HEAD with a green Dagger attempt: `action: deploy`
