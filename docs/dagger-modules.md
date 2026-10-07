@@ -310,6 +310,16 @@ async def ci(self, commit_sha: str, base_sha: str = "") -> str:
 Push to `main` never passes a base, so every merge still runs the full gate before any
 `workflow_run` deploy can start.
 
+### Keep a Git-linked project after a repository transfer
+
+A Pages project that was once connected to GitHub stores its source owner and repository name,
+and Cloudflare does not update the owner when the repository moves. The provider refuses any
+project whose stored source is not exactly `(git_source_owner, repository name)`.
+`git_source_owner` defaults to the target repository's owner, so most consumers never pass it.
+A repository moved from `hseshadr` to `gainratio` whose project still says `hseshadr` passes
+`git_source_owner="hseshadr"` (TypeScript: `{ gitSourceOwner: "hseshadr" }`). Only that owner
+pair may be crossed; any other owner, or a different repository name, is still refused.
+
 ### Opt in to Pages Functions
 
 Static consumers keep the call above unchanged. A Functions consumer authenticates exactly two

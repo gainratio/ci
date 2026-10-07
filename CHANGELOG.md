@@ -4,6 +4,14 @@
 
 ### Added
 
+- Dual-owner prep for moving the public repos to the `gainratio` org. Fleet policy, fleet
+  coverage, and legacy detection accept central `ci` under exactly `hseshadr` or `gainratio`
+  (`ALLOWED_OWNERS`); any other owner is still refused. Coverage lists both owners
+  (`users/hseshadr/repos`, `orgs/gainratio/repos`); an unreadable owner listing is a failing
+  `evidence-unreadable` finding instead of a crash. `cloudflare-pages` `deploy`/`preflight`/
+  `verify` take an optional `git_source_owner` (default: the target owner) so a moved repo can
+  keep a Pages project whose stored Git source still says `hseshadr`. No-op while every repo is
+  on `hseshadr`.
 - `cloudflare-pages` `deploy`/`preflight`/`verify` now ask `green-main-decision` about the
   envelope's own commit instead of `green-main`. If main moved past that commit while it was
   being built, they raise `superseded: <sha> is no longer main HEAD (<head>); the newer

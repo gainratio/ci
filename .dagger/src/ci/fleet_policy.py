@@ -20,6 +20,10 @@ from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 from pydantic.dataclasses import dataclass as validated_dataclass
 from tree_sitter import Language, Node, Parser
 
+# Exactly the owners the central repository may live under during the hseshadr -> gainratio
+# move. A literal allow-list, never a pattern: a lookalike owner must still be refused.
+ALLOWED_OWNERS: Final = ("hseshadr", "gainratio")
+CENTRAL_OWNER: Final = "(?:" + "|".join(re.escape(owner) for owner in ALLOWED_OWNERS) + ")"
 PINNED_ACTION: Final = re.compile(r"^[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
 REMOTE_MODULE_SHAPE: Final = re.compile(
     r"^github\.com/(?P<owner>[^/]+)/(?P<repo>[^/@]+)"
@@ -31,7 +35,7 @@ GITHUB_REPOSITORY: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 GITHUB_PATH_SEGMENT: Final = re.compile(r"[A-Za-z0-9._-]+")
 REMOTE_LIKE: Final = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|[^/]+\.[^/]+/)|@")
 PROVIDER_REMOTE: Final = re.compile(
-    r"^github\.com/hseshadr/ci/modules/cloudflare-pages@[0-9a-f]{40}$"
+    rf"^github\.com/{CENTRAL_OWNER}/ci/modules/cloudflare-pages@[0-9a-f]{{40}}$"
 )
 SENSITIVE_ARGUMENT: Final = re.compile(
     r"(?:token|secret|password|private_key|api_key|signing_key|oidc_url)$"
@@ -90,12 +94,19 @@ TYPESCRIPT_IDENTIFIER: Final = re.compile(r"[A-Za-z_$][\w$]*")
 TYPESCRIPT_INERT_NODES: Final = frozenset(("comment", "regex", "string"))
 TYPESCRIPT_LANGUAGE: Final = Language(ts_typescript.language_typescript())
 ALIAS_FLOW_PASSES: Final = 4
-SHARED_MODULES: Final[Mapping[str, str]] = MappingProxyType(
+
+
+def central_prefixes(subpath: str) -> tuple[str, ...]:
+    """Return one exact central `github.com/{owner}/ci/{subpath}` prefix per allowed owner."""
+    return tuple(f"github.com/{owner}/ci/{subpath}" for owner in ALLOWED_OWNERS)
+
+
+SHARED_MODULES: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
     {
-        "cloudflare-pages": "github.com/hseshadr/ci/modules/cloudflare-pages@",
-        "foundation": "github.com/hseshadr/ci/modules/portfolio-foundation@",
-        "portfolio-foundation": "github.com/hseshadr/ci/modules/portfolio-foundation@",
-        "python-package": "github.com/hseshadr/ci/modules/python-package@",
+        "cloudflare-pages": central_prefixes("modules/cloudflare-pages@"),
+        "foundation": central_prefixes("modules/portfolio-foundation@"),
+        "portfolio-foundation": central_prefixes("modules/portfolio-foundation@"),
+        "python-package": central_prefixes("modules/python-package@"),
     }
 )
 SECRET_REFERENCE: Final = re.compile(
@@ -103,14 +114,14 @@ SECRET_REFERENCE: Final = re.compile(
     re.IGNORECASE,
 )
 DYNAMIC_SECRET_REFERENCE: Final = re.compile(r"secrets\s*\[\s*(?!['\"])")
-# Oldest hseshadr/ci commit each central module may be pinned at. Raise a floor in the same PR
+# Oldest central ci commit each central module may be pinned at. Raise a floor in the same PR
 # that ships a fix every consumer must run. cloudflare-pages and python-package embed
 # portfolio-foundation at their own revision, so the foundation floor covers them too.
 REQUIRED_MINIMUM: Final[Mapping[str, str]] = MappingProxyType(
     {"portfolio-foundation": "dd19871486588b1582e432b7bc1f2cfffb296340"}
 )
 DESCENDANT_STATUSES: Final = frozenset(("ahead", "identical"))
-APPROVED_PUBLISHER_MODULES: Final = frozenset(("github.com/hseshadr/ci/modules/npm-publisher",))
+APPROVED_PUBLISHER_MODULES: Final = frozenset(central_prefixes("modules/npm-publisher"))
 # dagger-for-github pastes every `with:` input except `module` (passed as INPUT_MODULE env)
 # into bash, so a caller-controlled expression there is script injection (#49).
 ATTACKER_EXPRESSION: Final = re.compile(
@@ -121,9 +132,9 @@ ATTACKER_EXPRESSION: Final = re.compile(
 # The central, literal-SHA-pinned lineage proof a publisher runs before it trusts a
 # candidate (#49). Exact text: a hard-coded run id or SHA would prove a different run.
 LINEAGE_MODULE: Final = re.compile(
-    r"^github\.com/hseshadr/ci/modules/portfolio-foundation@[0-9a-f]{40}$"
+    rf"^github\.com/{CENTRAL_OWNER}/ci/modules/portfolio-foundation@[0-9a-f]{{40}}$"
 )
-LINEAGE_MODULE_PREFIX: Final = "github.com/hseshadr/ci/modules/portfolio-foundation@"
+LINEAGE_MODULE_PREFIXES: Final = central_prefixes("modules/portfolio-foundation@")
 LINEAGE_ARGUMENTS: Final = (
     '--github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" '
     '--head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"'
@@ -555,7 +566,7 @@ def shared_publisher_is_valid(
     config: DaggerConfig,
     dependency: DaggerDependency,
     configs: tuple[DaggerConfig, ...],
-    expected: str,
+    expected: tuple[str, ...],
 ) -> bool:
     """Allow exact consumers and local edges inside the exact central module tree."""
     if dependency.source.startswith(expected):
@@ -568,11 +579,11 @@ def local_dependency_is_valid(
 ) -> bool:
     """Accept one reviewed central edge only when both configs share a revision."""
     rule = matching_local_rule(config, dependency)
-    revision = central_config_revision(config)
-    if rule is None or revision is None:
+    central = central_config_revision(config)
+    if rule is None or central is None:
         return False
     target = next((item for item in configs if item.path == rule.target_path), None)
-    return target_matches_rule(target, rule, revision)
+    return target_matches_rule(target, rule, central)
 
 
 def matching_local_rule(
@@ -598,29 +609,35 @@ def local_rule_matches(
     return parent and child
 
 
-def central_config_revision(config: DaggerConfig) -> str | None:
-    """Return the revision only for an exact hseshadr/ci config identity."""
+def central_config_revision(config: DaggerConfig) -> tuple[str, str] | None:
+    """Return (owner, revision) only for an exact allowed-owner central ci config identity."""
     remote = parse_pinned_remote(config.identity)
-    if remote is None or remote[:2] != ("hseshadr", "ci"):
+    if remote is None or not is_central_remote(remote):
         return None
-    expected = central_config_identity(config.path, remote[3])
-    return remote[3] if config.identity == expected else None
+    owner, revision = remote[0], remote[3]
+    expected = central_config_identity(config.path, owner, revision)
+    return (owner, revision) if config.identity == expected else None
 
 
-def central_config_identity(config_path: str, revision: str) -> str:
-    """Build the sole central identity for an exact config path and revision."""
+def is_central_remote(remote: RemoteIdentity) -> bool:
+    """Return whether a parsed remote is the central ci repository under an allowed owner."""
+    return remote[0] in ALLOWED_OWNERS and remote[1] == "ci"
+
+
+def central_config_identity(config_path: str, owner: str, revision: str) -> str:
+    """Build the sole central identity for an exact config path, owner, and revision."""
     subpath = posixpath.dirname(config_path)
     suffix = "" if subpath in {"", "."} else f"/{subpath}"
-    return f"github.com/hseshadr/ci{suffix}@{revision}"
+    return f"github.com/{owner}/ci{suffix}@{revision}"
 
 
 def target_matches_rule(
-    target: DaggerConfig | None, rule: LocalDependencyRule, revision: str
+    target: DaggerConfig | None, rule: LocalDependencyRule, central: tuple[str, str]
 ) -> bool:
-    """Bind loaded target path, name, and identity to the parent's revision."""
+    """Bind loaded target path, name, and identity to the parent's owner and revision."""
     if target is None or target.name != rule.target_name:
         return False
-    expected = central_config_identity(rule.target_path, revision)
+    expected = central_config_identity(rule.target_path, *central)
     return target.identity == expected
 
 
@@ -1238,7 +1255,7 @@ def split_lineage(
 def is_lineage_step(step: WorkflowStep) -> bool:
     """Return whether a step loads the central lineage module."""
     module = scalar_text(step.with_.get("module"))
-    return action_name(step) == DAGGER_ACTION and module.startswith(LINEAGE_MODULE_PREFIX)
+    return action_name(step) == DAGGER_ACTION and module.startswith(LINEAGE_MODULE_PREFIXES)
 
 
 def validate_required_lineage(path: str, step: WorkflowStep | None) -> tuple[PolicyFinding, ...]:
@@ -1385,13 +1402,20 @@ def remote_dagger_module(steps: tuple[WorkflowStep, ...]) -> str:
 
 def publisher_module_is_authorized(module: str, repository: str) -> bool:
     """Accept the consumer at the candidate or main SHA, or an approved central publisher."""
-    own = (
-        f"github.com/hseshadr/{repository}@${{{{ github.event.workflow_run.head_sha }}}}",
-        f"github.com/hseshadr/{repository}@${{{{ github.sha }}}}",
-    )
     base, separator, revision = module.rpartition("@")
     literal = separator == "@" and base in APPROVED_PUBLISHER_MODULES
-    return module in own or (literal and re.fullmatch(r"[0-9a-f]{40}", revision) is not None)
+    exact = literal and re.fullmatch(r"[0-9a-f]{40}", revision) is not None
+    return module in own_publisher_modules(repository) or exact
+
+
+def own_publisher_modules(repository: str) -> frozenset[str]:
+    """Return the consumer's own module at the candidate or main SHA under each allowed owner."""
+    revisions = ("github.event.workflow_run.head_sha", "github.sha")
+    return frozenset(
+        f"github.com/{owner}/{repository}@${{{{ {revision} }}}}"
+        for owner in ALLOWED_OWNERS
+        for revision in revisions
+    )
 
 
 def oidc_arguments_are_typed(step: WorkflowStep) -> bool:
@@ -1947,7 +1971,7 @@ def has_green_integration(snapshot: RepositorySnapshot, context: str) -> bool:
 def validate_legacy(snapshot: RepositorySnapshot) -> tuple[PolicyFinding, ...]:
     """Block central deletion while a live consumer executes a legacy control."""
     return tuple(
-        finding("legacy-central-reference", reference, "retired hseshadr/ci execution")
+        finding("legacy-central-reference", reference, "retired central ci execution")
         for reference in snapshot.legacy_references
     )
 
@@ -1995,9 +2019,9 @@ def required_minimum_pins(configs: tuple[DaggerConfig, ...]) -> tuple[tuple[str,
 
 
 def floored_pin(config: DaggerConfig) -> tuple[str, str] | None:
-    """Return (floor, pin) for one exact hseshadr/ci module config with a floor."""
+    """Return (floor, pin) for one exact allowed-owner central ci module config with a floor."""
     remote = parse_pinned_remote(config.identity)
-    if remote is None or remote[:2] != ("hseshadr", "ci"):
+    if remote is None or not is_central_remote(remote):
         return None
     floor = REQUIRED_MINIMUM.get(remote[2].removeprefix("modules/"))
     return None if floor is None else (floor, remote[3])

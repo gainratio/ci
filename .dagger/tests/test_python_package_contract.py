@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import cast
 
-from ci.fleet_policy import SourceFile, validate_workflow
+from ci.fleet_policy import SHARED_MODULES, SourceFile, validate_workflow
 
 ROOT = Path(__file__).parents[2]
 MODULE = ROOT / "modules" / "python-package"
@@ -35,7 +35,10 @@ def test_should_register_python_package_in_central_same_tree_fleet() -> None:
 
     # Then both same-tree edges and the exact remote publisher are closed contracts
     assert {"name": "python-package", "source": "modules/python-package"} in dependencies
-    assert '"python-package": "github.com/hseshadr/ci/modules/python-package@"' in fleet
+    assert SHARED_MODULES["python-package"] == (
+        "github.com/hseshadr/ci/modules/python-package@",
+        "github.com/gainratio/ci/modules/python-package@",
+    )
     assert '"modules/python-package/dagger.json"' in fleet
     assert '"../portfolio-foundation"' in fleet
 

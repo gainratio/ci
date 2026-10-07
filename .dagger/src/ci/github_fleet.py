@@ -16,6 +16,7 @@ from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 from pydantic.dataclasses import dataclass as validated_dataclass
 
 from ci.fleet_policy import (
+    ALLOWED_OWNERS,
     CheckApp,
     CheckRun,
     DaggerConfig,
@@ -36,6 +37,7 @@ WORKFLOW_PREFIX: Final = ".github/workflows/"
 MODULE_PREFIXES: Final = (".dagger/src/", "dagger/src/")
 HTTP_OK: Final = 200
 HTTP_NOT_FOUND: Final = 404
+# API reads only (pin ancestry compares); GitHub redirects this path after a transfer.
 CENTRAL_REPOSITORY: Final = "repos/hseshadr/ci"
 
 
@@ -901,4 +903,5 @@ def to_check_run(payload: CheckPayload) -> CheckRun:
 
 def legacy_references(workflows: tuple[SourceFile, ...]) -> tuple[str, ...]:
     """Locate live execution references to the retiring central controls."""
-    return tuple(source.path for source in workflows if "uses: hseshadr/ci/" in source.text)
+    markers = tuple(f"uses: {owner}/ci/" for owner in ALLOWED_OWNERS)
+    return tuple(source.path for source in workflows if any(m in source.text for m in markers))

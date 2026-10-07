@@ -148,6 +148,7 @@ class TargetInputs:
     deploy_root: str
     domains: tuple[str, ...]
     pages_functions: bool = False
+    git_source_owner: str = ""
 
 
 @object_type
@@ -324,11 +325,11 @@ class CloudflarePages:
         workflow_run_id: str, run_attempt: int, repository: str, project: str,
         production_branch: str, live_domain: str, deploy_root: str, domains: list[str],
         consumer_identity: str, producing_identity: str, allowed_roots: list[str],
-        pages_functions: bool = False,
+        pages_functions: bool = False, git_source_owner: str = "",
     ) -> str:
         """Verify the envelope and run read-only project, deployment, and CLI checks."""
         inputs = _target_inputs(repository, project, production_branch, live_domain,
-                                deploy_root, domains, pages_functions)
+                                deploy_root, domains, pages_functions, git_source_owner)
         return await _preflight(envelope, github_token, cloudflare_api_token,
                                 cloudflare_account_id, workflow_run_id, run_attempt,
                                 inputs, consumer_identity, producing_identity, allowed_roots)
@@ -342,11 +343,11 @@ class CloudflarePages:
         workflow_run_id: str, run_attempt: int, repository: str, project: str,
         production_branch: str, live_domain: str, deploy_root: str, domains: list[str],
         consumer_identity: str, producing_identity: str, allowed_roots: list[str],
-        pages_functions: bool = False,
+        pages_functions: bool = False, git_source_owner: str = "",
     ) -> DeploymentEvidence:
         """Direct-upload one verified artifact and return exact deployment evidence."""
         inputs = _target_inputs(repository, project, production_branch, live_domain,
-                                deploy_root, domains, pages_functions)
+                                deploy_root, domains, pages_functions, git_source_owner)
         return await _deploy(envelope, github_token, cloudflare_api_token,
                              cloudflare_account_id, workflow_run_id, run_attempt,
                              inputs, consumer_identity, producing_identity, allowed_roots)
@@ -384,11 +385,11 @@ class CloudflarePages:
         workflow_run_id: str, run_attempt: int, repository: str, project: str,
         production_branch: str, live_domain: str, deploy_root: str, domains: list[str],
         consumer_identity: str, producing_identity: str, allowed_roots: list[str],
-        pages_functions: bool = False,
+        pages_functions: bool = False, git_source_owner: str = "",
     ) -> DeploymentEvidence:
         """Converge read-only production evidence for an exact source attempt."""
         inputs = _target_inputs(repository, project, production_branch, live_domain,
-                                deploy_root, domains, pages_functions)
+                                deploy_root, domains, pages_functions, git_source_owner)
         return await _verify(envelope, github_token, cloudflare_api_token,
                              cloudflare_account_id, workflow_run_id, run_attempt,
                              inputs, consumer_identity, producing_identity, allowed_roots)
@@ -403,9 +404,17 @@ def _target_inputs(
     deploy_root: str,
     domains: list[str],
     pages_functions: bool,
+    git_source_owner: str = "",
 ) -> TargetInputs:
     return TargetInputs(
-        repository, project, branch, domain, deploy_root, tuple(domains), pages_functions
+        repository,
+        project,
+        branch,
+        domain,
+        deploy_root,
+        tuple(domains),
+        pages_functions,
+        git_source_owner,
     )
 
 
@@ -514,6 +523,7 @@ def _pages_target(inputs: TargetInputs) -> PagesTarget:
         inputs.deploy_root,
         inputs.domains,
         inputs.pages_functions,
+        inputs.git_source_owner,
     )
 
 

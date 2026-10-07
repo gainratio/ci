@@ -9,6 +9,9 @@ from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# The only owner pair a target may cross when it declares its Pages Git-source owner: the
+# hseshadr -> gainratio move. A literal allow-list, never a pattern.
+MIGRATION_OWNERS: Final = ("hseshadr", "gainratio")
 OWNER_PATTERN: Final = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 REPOSITORY_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 PROJECT_PATTERN: Final = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,56}[a-z0-9])?")
@@ -269,6 +272,7 @@ class PagesTarget:
     deploy_root: str
     domains: tuple[str, ...]
     pages_functions: bool
+    git_source_owner: str
 
     def __init__(
         self,
@@ -279,8 +283,10 @@ class PagesTarget:
         deploy_root: str,
         domains: tuple[str, ...] = (),
         pages_functions: bool = False,
+        git_source_owner: str = "",
     ) -> None:
         identity = RepositoryIdentity.parse(repository)
+        source_owner = _git_source_owner(identity, git_source_owner)
         required_domains = _canonical_domains(live_domain, domains)
         _require_target_binding(identity, project, branch)
         if DEPLOY_ROOT_PATTERN.fullmatch(deploy_root) is None:
@@ -292,6 +298,7 @@ class PagesTarget:
         object.__setattr__(self, "deploy_root", deploy_root)
         object.__setattr__(self, "domains", required_domains)
         object.__setattr__(self, "pages_functions", pages_functions)
+        object.__setattr__(self, "git_source_owner", source_owner)
 
 
 @dataclass(frozen=True)
@@ -367,6 +374,18 @@ def _canonical_domains(primary: str, aliases: tuple[str, ...]) -> tuple[str, ...
     if any(DOMAIN_PATTERN.fullmatch(domain) is None for domain in domains):
         raise ValueError("target domains must be canonical DNS names")
     return tuple(sorted(domains))
+
+
+def _git_source_owner(repository: RepositoryIdentity, declared: str) -> str:
+    """Default to the target owner; a different owner only within the migration pair."""
+    owner = declared or repository.owner
+    if owner != repository.owner and not _migration_pair(owner, repository.owner):
+        raise ValueError("git source owner must be the target owner or its migration pair")
+    return owner
+
+
+def _migration_pair(source_owner: str, target_owner: str) -> bool:
+    return source_owner in MIGRATION_OWNERS and target_owner in MIGRATION_OWNERS
 
 
 def _require_target_binding(repository: RepositoryIdentity, project: str, branch: str) -> None:
