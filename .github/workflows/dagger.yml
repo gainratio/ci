@@ -32,6 +32,7 @@ jobs:
           verb: call
           args: >-
             ci --github-token=env:GITHUB_TOKEN
+            --repository=${{ github.repository }}
             --commit-sha=${{ github.sha }}
   fleet:
     name: Dagger fleet policy

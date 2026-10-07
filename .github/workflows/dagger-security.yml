@@ -31,4 +31,5 @@ jobs:
           verb: call
           args: >-
             security --github-token=env:GITHUB_TOKEN
+            --repository=${{ github.repository }}
             --commit-sha=${{ github.sha }}
