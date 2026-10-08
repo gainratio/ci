@@ -12,6 +12,7 @@ from ci.fleet_policy import (
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
+    PendingCheck,
     PinAncestry,
     PolicyFinding,
     Protection,
@@ -464,6 +465,110 @@ def test_should_reject_missing_or_wrong_branch_protection_integration() -> None:
 
     # Then projections and stale checks cannot look healthy
     assert {"required-check-app", "main-integration"} <= set(codes)
+
+
+PARENT = "c" * 40
+GREEN = CheckRun(name="Dagger", app_id=15368, head_sha=SHA, conclusion="success")
+RED = CheckRun(name="Dagger", app_id=15368, head_sha=SHA, conclusion="failure")
+RUNNING = PendingCheck(name="Dagger", app_id=15368, head_sha=SHA)
+PARENT_GREEN = CheckRun(name="Dagger", app_id=15368, head_sha=PARENT, conclusion="success")
+PARENT_RED = CheckRun(name="Dagger", app_id=15368, head_sha=PARENT, conclusion="failure")
+
+
+def _integration(
+    runs: tuple[CheckRun, ...],
+    pending: tuple[PendingCheck, ...],
+    previous: tuple[CheckRun, ...] = (),
+) -> tuple[str, ...]:
+    snapshot = replace(
+        _snapshot(INGRESS),
+        check_runs=runs,
+        pending_check_runs=pending,
+        previous_main_sha=PARENT if previous else None,
+        previous_check_runs=previous,
+    )
+    return tuple(code for code in _codes(snapshot) if code == "main-integration")
+
+
+def test_should_fall_back_to_green_previous_main_while_exact_main_runs() -> None:
+    # Given main just moved, its Dagger check is running, and the prior main was green
+    # When exact-main integration is evaluated
+    codes = _integration((), (RUNNING,), (PARENT_GREEN,))
+
+    # Then the race is judged on the latest completed main, which is green
+    assert codes == ()
+
+
+def test_should_report_red_previous_main_while_exact_main_runs() -> None:
+    # Given the running check's fallback, the previous completed main, is red
+    # When / Then the red completed main is still reported
+    assert _integration((), (RUNNING,), (PARENT_RED,)) == ("main-integration",)
+
+
+def test_should_report_running_exact_main_with_no_completed_fallback() -> None:
+    # Given a running check and no completed previous main to judge against
+    # When / Then pending without completed evidence fails closed
+    assert _integration((), (RUNNING,)) == ("main-integration",)
+
+
+def test_should_still_report_completed_failure_while_a_rerun_is_running() -> None:
+    # Given exact main has a completed red Dagger check, a rerun, and a green parent
+    # When exact-main integration is evaluated
+    codes = _integration((RED,), (RUNNING,), (PARENT_GREEN,))
+
+    # Then the completed failure is never hidden by pending work
+    assert codes == ("main-integration",)
+
+
+def test_should_report_completed_failure_on_exact_main() -> None:
+    # Given exact main finished red
+    # When / Then a completed failure is always a finding
+    assert _integration((RED,), ()) == ("main-integration",)
+
+
+def test_should_fail_closed_when_exact_main_has_no_check_at_all() -> None:
+    # Given an empty exact-main run list, even with a green previous main
+    # When / Then a never-triggered integration is a finding, not pending
+    assert _integration((), (), (PARENT_GREEN,)) == ("main-integration",)
+
+
+@pytest.mark.parametrize(
+    "pending",
+    [
+        PendingCheck(name="Dagger", app_id=7, head_sha=SHA),
+        PendingCheck(name="Dagger", app_id=15368, head_sha="b" * 40),
+        PendingCheck(name="Other", app_id=15368, head_sha=SHA),
+    ],
+)
+def test_should_ignore_pending_checks_from_wrong_app_commit_or_context(
+    pending: PendingCheck,
+) -> None:
+    # Given pending work that is not the protected exact-main context
+    # When / Then it cannot defer the missing integration
+    assert _integration((), (pending,), (PARENT_GREEN,)) == ("main-integration",)
+
+
+@pytest.mark.parametrize(
+    "previous",
+    [
+        CheckRun(name="Dagger", app_id=7, head_sha=PARENT, conclusion="success"),
+        CheckRun(name="Dagger", app_id=15368, head_sha="d" * 40, conclusion="success"),
+        CheckRun(name="Other", app_id=15368, head_sha=PARENT, conclusion="success"),
+        CheckRun(name="Dagger", app_id=15368, head_sha=PARENT, conclusion="mystery"),
+    ],
+)
+def test_should_ignore_previous_main_evidence_that_is_not_a_green_protected_check(
+    previous: CheckRun,
+) -> None:
+    # Given fallback evidence from the wrong app, commit, context, or an unknown conclusion
+    # When / Then it cannot vouch for the running exact main
+    assert _integration((), (RUNNING,), (previous,)) == ("main-integration",)
+
+
+def test_should_keep_green_exact_main_green() -> None:
+    # Given a successful exact-main check (with an unrelated rerun running)
+    # When / Then there is no integration finding
+    assert _integration((GREEN,), (RUNNING,)) == ()
 
 
 def test_should_reject_legacy_central_execution_reference() -> None:

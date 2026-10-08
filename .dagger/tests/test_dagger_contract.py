@@ -397,7 +397,11 @@ def test_should_name_checks_and_contents_read_scopes() -> None:
 def test_should_reject_unfinished_check_conversion() -> None:
     # Given
     check = CheckPayload(
-        name="Dagger", head_sha="a" * 40, conclusion=None, app=AppPayload(1, "app")
+        name="Dagger",
+        head_sha="a" * 40,
+        status="in_progress",
+        conclusion=None,
+        app=AppPayload(1, "app"),
     )
 
     # When / Then

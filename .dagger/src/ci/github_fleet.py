@@ -7,12 +7,12 @@ import posixpath
 from dataclasses import dataclass
 from functools import partial
 from types import TracebackType
-from typing import Final, Protocol, Self, cast
+from typing import Final, Literal, Protocol, Self, cast
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, build_opener
 
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 from pydantic.dataclasses import dataclass as validated_dataclass
 
 from ci.fleet_policy import (
@@ -22,6 +22,7 @@ from ci.fleet_policy import (
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
+    PendingCheck,
     PinAncestry,
     Protection,
     RepositorySnapshot,
@@ -141,6 +142,7 @@ class SnapshotParts:
     codeql: CodeqlPayload
     environments: tuple[DeploymentEnvironment, ...]
     repository_secrets: tuple[str, ...]
+    previous: PreviousMain
 
 
 @dataclass(frozen=True)
@@ -350,14 +352,48 @@ class AppPayload:
     slug: str
 
 
+CheckStatus = Literal["queued", "in_progress", "completed", "waiting", "requested", "pending"]
+
+
 @validated_dataclass(config=BOUNDARY_CONFIG)
 class CheckPayload:
-    """One exact-commit check run."""
+    """One exact-commit check run; only a completed run may carry a conclusion."""
 
     name: str
     head_sha: str
+    status: CheckStatus
     conclusion: str | None
     app: AppPayload
+
+    @model_validator(mode="after")
+    def require_consistent_completion(self) -> Self:
+        """Reject a completed run without a conclusion, or an unfinished run with one."""
+        if (self.status == "completed") != (self.conclusion is not None):
+            raise ValueError(f"check status {self.status} contradicts its conclusion")
+        return self
+
+
+@validated_dataclass(config=BOUNDARY_CONFIG)
+class ParentPayload:
+    """One parent commit identity."""
+
+    sha: str
+
+
+@validated_dataclass(config=BOUNDARY_CONFIG)
+class CommitParentsPayload:
+    """GitHub single-commit response; ``parents`` is required, never defaulted."""
+
+    sha: str
+    parents: tuple[ParentPayload, ...]
+
+
+@validated_dataclass(config=BOUNDARY_CONFIG)
+class PreviousMain:
+    """The most recent completed main evidence, read only while exact main runs."""
+
+    sha: str | None = None
+    runs: tuple[CheckRun, ...] = ()
 
 
 @validated_dataclass(config=BOUNDARY_CONFIG)
@@ -443,10 +479,24 @@ def read_snapshot_parts(
     """Read non-source evidence and assemble immutable snapshot parts."""
     protection = read_protection(transport, base)
     checks = read_checks(transport, base, evidence.sha)
+    previous = read_previous_main(transport, base, evidence.sha, checks)
     codeql = read_model(transport, f"{base}/code-scanning/default-setup", CodeqlPayload)
     environments = read_environments(transport, base)
-    repository_secrets = read_secret_names(transport, f"{base}/actions/secrets?per_page=100")
-    return SnapshotParts(evidence, protection, checks, codeql, environments, repository_secrets)
+    secrets = read_secret_names(transport, f"{base}/actions/secrets?per_page=100")
+    return SnapshotParts(evidence, protection, checks, codeql, environments, secrets, previous)
+
+
+def read_previous_main(
+    transport: GitHubTransport, base: str, sha: str, checks: CheckRunsPayload
+) -> PreviousMain:
+    """Read first-parent completed checks only when an exact-main check is unfinished."""
+    if all(item.status == "completed" for item in checks.check_runs):
+        return PreviousMain()
+    commit = read_model(transport, f"{base}/commits/{sha}", CommitParentsPayload)
+    if not commit.parents:
+        return PreviousMain()
+    parent = commit.parents[0].sha
+    return PreviousMain(parent, build_check_runs(read_checks(transport, base, parent)))
 
 
 def read_model[T](transport: GitHubTransport, path: str, model: type[T]) -> T:
@@ -836,6 +886,9 @@ def create_snapshot(parts: SnapshotParts, projection: SnapshotProjection) -> Rep
         environments=parts.environments,
         repository_secret_names=parts.repository_secrets,
         pin_ancestry=evidence.ancestry,
+        pending_check_runs=build_pending_check_runs(parts.checks),
+        previous_main_sha=parts.previous.sha,
+        previous_check_runs=parts.previous.runs,
     )
 
 
@@ -881,7 +934,16 @@ def select_modules(sources: tuple[SourceFile, ...]) -> tuple[SourceFile, ...]:
 
 def build_check_runs(checks: CheckRunsPayload) -> tuple[CheckRun, ...]:
     """Translate only concluded checks into greenable domain evidence."""
-    return tuple(to_check_run(item) for item in checks.check_runs if item.conclusion is not None)
+    return tuple(to_check_run(item) for item in checks.check_runs if item.status == "completed")
+
+
+def build_pending_check_runs(checks: CheckRunsPayload) -> tuple[PendingCheck, ...]:
+    """Keep queued or in-progress checks apart so they can never count as green."""
+    return tuple(
+        PendingCheck(name=item.name, app_id=item.app.id, head_sha=item.head_sha)
+        for item in checks.check_runs
+        if item.status != "completed"
+    )
 
 
 def build_check_apps(checks: CheckRunsPayload) -> tuple[CheckApp, ...]:
