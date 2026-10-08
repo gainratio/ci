@@ -138,12 +138,14 @@ def _responses() -> dict[str, HttpResponse]:
                     {
                         "name": "Dagger",
                         "head_sha": SHA,
+                        "status": "completed",
                         "conclusion": "success",
                         "app": {"id": 15368, "slug": "github-actions"},
                     },
                     {
                         "name": "GitGuardian Security Checks",
                         "head_sha": SHA,
+                        "status": "completed",
                         "conclusion": "success",
                         "app": {"id": 123, "slug": "gitguardian"},
                     },
@@ -285,11 +287,13 @@ def test_should_parse_in_progress_checks_without_treating_them_as_green() -> Non
         {
             "name": "Dagger fleet policy",
             "head_sha": SHA,
+            "status": "in_progress",
             "conclusion": None,
             "app": {"id": 999, "slug": "untrusted-app"},
         }
     )
     responses[path] = _json(payload)
+    responses.update(_previous_main(conclusion="success"))
 
     # When the authoritative boundary parses the live check page
     snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
@@ -693,4 +697,120 @@ def test_should_fail_closed_when_compare_endpoint_errors() -> None:
     # When the repository is read
     # Then the scan fails instead of guessing ancestry
     with pytest.raises(FleetAccessError, match="compare"):
+        read_repository(FakeTransport(responses), "gainratio", "example")
+
+
+PARENT = "c" * 40
+CHECKS_PATH = f"repos/gainratio/example/commits/{SHA}/check-runs?per_page=100"
+PARENT_CHECKS_PATH = f"repos/gainratio/example/commits/{PARENT}/check-runs?per_page=100"
+
+
+def _previous_main(conclusion: str) -> dict[str, HttpResponse]:
+    run = {
+        "name": "Dagger",
+        "head_sha": PARENT,
+        "status": "completed",
+        "conclusion": conclusion,
+        "app": {"id": 15368, "slug": "github-actions"},
+    }
+    return {
+        f"repos/gainratio/example/commits/{SHA}": _json({"sha": SHA, "parents": [{"sha": PARENT}]}),
+        PARENT_CHECKS_PATH: _json({"total_count": 1, "check_runs": [run]}),
+    }
+
+
+def _with_dagger_run(**fields: object) -> dict[str, HttpResponse]:
+    responses = _responses()
+    payload = json.loads(responses[CHECKS_PATH].body)
+    dagger = payload["check_runs"][0]
+    dagger.update(fields)
+    for key in [key for key, value in fields.items() if value is MISSING]:
+        del dagger[key]
+    responses[CHECKS_PATH] = _json(payload)
+    responses.update(_previous_main(conclusion="success"))
+    return responses
+
+
+MISSING = object()
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"status": "mystery"},
+        {"status": "mystery", "conclusion": None},
+        {"status": "COMPLETED"},
+        {"status": "COMPLETED", "conclusion": None},
+        {"status": None, "conclusion": None},
+        {"status": MISSING},
+        {"conclusion": MISSING},
+        {"status": "completed", "conclusion": None},
+        {"status": "in_progress", "conclusion": "success"},
+        {"status": "queued", "conclusion": "failure"},
+    ],
+)
+def test_should_fail_closed_when_check_status_is_unknown_missing_or_contradictory(
+    fields: dict[str, object],
+) -> None:
+    # Given a check run whose status cannot be trusted
+    responses = _with_dagger_run(**fields)
+
+    # When / Then the reader refuses the page instead of guessing pending or green
+    with pytest.raises(FleetAccessError, match="invalid authoritative response"):
+        read_repository(FakeTransport(responses), "gainratio", "example")
+
+
+def test_should_read_previous_main_checks_when_exact_main_is_running() -> None:
+    # Given exact main's Dagger check is still running
+    responses = _with_dagger_run(status="in_progress", conclusion=None)
+
+    # When the reader assembles evidence
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
+
+    # Then the most recent completed main (the first parent) is the fallback evidence
+    assert snapshot.previous_main_sha == PARENT
+    assert [run.conclusion for run in snapshot.previous_check_runs] == ["success"]
+
+
+def test_should_skip_previous_main_read_when_exact_main_is_complete() -> None:
+    # Given every exact-main check has completed (no parent fixtures exist)
+    # When the reader assembles evidence
+    snapshot = read_repository(FakeTransport(_responses()), "gainratio", "example")
+
+    # Then no fallback evidence is read or invented
+    assert snapshot.previous_main_sha is None
+    assert snapshot.previous_check_runs == ()
+
+
+def test_should_record_no_previous_main_for_a_root_commit() -> None:
+    # Given a running check on a commit with no parent
+    responses = _with_dagger_run(status="queued", conclusion=None)
+    responses[f"repos/gainratio/example/commits/{SHA}"] = _json({"sha": SHA, "parents": []})
+
+    # When the reader assembles evidence
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
+
+    # Then there is no completed fallback to lean on
+    assert snapshot.previous_main_sha is None
+    assert snapshot.previous_check_runs == ()
+
+
+@pytest.mark.parametrize(
+    ("path", "response"),
+    [
+        (PARENT_CHECKS_PATH, HttpResponse(status=500, body="{}")),
+        (PARENT_CHECKS_PATH, HttpResponse(status=200, body="not json")),
+        (f"repos/gainratio/example/commits/{SHA}", HttpResponse(status=502, body="{}")),
+        (f"repos/gainratio/example/commits/{SHA}", _json({"sha": SHA})),
+    ],
+)
+def test_should_fail_closed_when_previous_main_cannot_be_read(
+    path: str, response: HttpResponse
+) -> None:
+    # Given exact main is running and the fallback evidence errors or will not parse
+    responses = _with_dagger_run(status="in_progress", conclusion=None)
+    responses[path] = response
+
+    # When / Then the scan stops instead of skipping the check
+    with pytest.raises(FleetAccessError):
         read_repository(FakeTransport(responses), "gainratio", "example")

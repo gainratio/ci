@@ -382,6 +382,8 @@ class RepositorySnapshot:
     repository_secret_names: tuple[str, ...] = Field(default_factory=tuple)
     pin_ancestry: tuple[PinAncestry, ...] = Field(default_factory=tuple)
     pending_check_runs: tuple[PendingCheck, ...] = Field(default_factory=tuple)
+    previous_main_sha: str | None = None
+    previous_check_runs: tuple[CheckRun, ...] = Field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -1962,9 +1964,10 @@ def validate_integrations(
 ) -> tuple[PolicyFinding, ...]:
     """Require each protected context green from GitHub Actions on exact main.
 
-    A context whose only exact-main evidence is a queued or in-progress run is
-    pending, not red: main just moved and its check has not finished. Any
-    completed non-success, or no run at all, is still a finding.
+    When exact main's only evidence is a queued or in-progress run, the context is
+    judged on the most recent completed main (the first parent). A completed
+    non-success, an empty run list, or a pending run with no green completed
+    fallback is always a finding.
     """
     for context in expectation.required_contexts:
         if not integration_is_acceptable(snapshot, context):
@@ -1973,19 +1976,23 @@ def validate_integrations(
 
 
 def integration_is_acceptable(snapshot: RepositorySnapshot, context: str) -> bool:
-    """Return whether one context is green, or only pending with no completed red."""
-    completed = exact_main_conclusions(snapshot, context)
-    if "success" in completed:
-        return True
-    return not completed and has_pending_integration(snapshot, context)
+    """Return whether exact main is green, or running on top of a green completed main."""
+    completed = conclusions(snapshot.check_runs, context, snapshot.sha)
+    if completed:
+        return "success" in completed
+    if not has_pending_integration(snapshot, context):
+        return False
+    return "success" in conclusions(
+        snapshot.previous_check_runs, context, snapshot.previous_main_sha
+    )
 
 
-def exact_main_conclusions(snapshot: RepositorySnapshot, context: str) -> tuple[str, ...]:
-    """Return every completed exact-main app-bound conclusion for one context."""
+def conclusions(runs: tuple[CheckRun, ...], context: str, sha: str | None) -> tuple[str, ...]:
+    """Return every completed app-bound conclusion for one context on one commit."""
     return tuple(
         run.conclusion
-        for run in snapshot.check_runs
-        if (run.name, run.app_id, run.head_sha) == (context, APP_ID, snapshot.sha)
+        for run in runs
+        if (run.name, run.app_id, run.head_sha) == (context, APP_ID, sha)
     )
 
 
