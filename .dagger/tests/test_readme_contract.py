@@ -49,7 +49,7 @@ def test_should_open_with_name_and_plain_audience_sentence() -> None:
     title, blank, sentence = lines[0], lines[1], lines[2]
 
     # Then it names the repo and says plainly who it is for and what it holds
-    assert title == "# hseshadr/ci"
+    assert title == "# gainratio/ci"
     assert blank == ""
     assert "Harish Seshadri's own repositories" in sentence
     assert "Dagger modules" in sentence

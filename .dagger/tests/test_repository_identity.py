@@ -14,6 +14,7 @@ from typing import cast
 import dagger
 import pytest
 
+from ci import fleet, github_fleet
 from ci import main as main_module
 from ci.main import Ci
 
@@ -79,6 +80,13 @@ def test_should_require_the_runs_repository_with_no_stale_default_owner(gate: st
     assert parameter.default is inspect.Parameter.empty
     assert not hasattr(main_module, "REPOSITORY")
     assert not hasattr(main_module, "REPOSITORY_URL")
+
+
+def test_should_read_the_reviewed_fleet_under_the_gainratio_org() -> None:
+    # Given the fleet moved to gainratio, reads must not lean on a transfer redirect
+    # Then reviewed repositories and central pin ancestry resolve under gainratio directly
+    assert fleet.OWNER == "gainratio"
+    assert github_fleet.CENTRAL_REPOSITORY == "repos/gainratio/ci"
 
 
 def test_should_allow_exactly_the_two_migration_identities() -> None:

@@ -74,7 +74,7 @@ class FakeDag:
 
     def git(self, url: str) -> FakeGitRepository:
         self.git_calls.append(url)
-        assert url == "https://github.com/hseshadr/ci.git"
+        assert url == "https://github.com/gainratio/ci.git"
         return FakeGitRepository()
 
     def container(self, platform: dagger.Platform | None = None) -> FakeGraphContainer:
@@ -252,10 +252,10 @@ def test_should_delegate_security_guard_with_exact_source_context(
     central, source, shared, fake_dag = _guarded_central(monkeypatch, events)
 
     # When
-    asyncio.run(central._security("a" * 40, "hseshadr/ci", cast(dagger.Secret, object())))
+    asyncio.run(central._security("a" * 40, "gainratio/ci", cast(dagger.Secret, object())))
 
     # Then
-    assert shared.guard_call == (source, "hseshadr/ci", "a" * 40)
+    assert shared.guard_call == (source, "gainratio/ci", "a" * 40)
     assert events == ["dependency-audit", "foundation.guard", "zizmor"]
     assert fake_dag.git_calls == []
 
@@ -270,14 +270,14 @@ def test_should_run_public_ci_in_protected_order(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(central, "_module_fixtures", _fixture_recorder(events))
 
     # When
-    result: str = asyncio.run(central.ci(cast(dagger.Secret, object()), "hseshadr/ci", "a" * 40))
+    result: str = asyncio.run(central.ci(cast(dagger.Secret, object()), "gainratio/ci", "a" * 40))
 
     # Then
     assert result == "central Dagger gate passed"
     assert events == [
         "quality",
         "module-gates",
-        "security:" + "a" * 40 + "@hseshadr/ci",
+        "security:" + "a" * 40 + "@gainratio/ci",
         "module-fixtures",
     ]
 
@@ -289,11 +289,11 @@ def test_should_run_public_security_without_quality(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(central, "_security", _security_recorder(events))
 
     # When
-    result: str = asyncio.run(central.security(cast(dagger.Secret, object()), "hseshadr/ci"))
+    result: str = asyncio.run(central.security(cast(dagger.Secret, object()), "gainratio/ci"))
 
     # Then
     assert result == "central Dagger security gate passed"
-    assert events == ["security:@hseshadr/ci"]
+    assert events == ["security:@gainratio/ci"]
 
 
 def test_should_build_all_retained_central_graph_lanes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -416,10 +416,10 @@ def test_should_preserve_main_resolution_when_commit_is_omitted(
     monkeypatch.setattr(main_module, "dag", FakeDag(shared))
 
     # When
-    asyncio.run(central._repository_guard("", "hseshadr/ci"))
+    asyncio.run(central._repository_guard("", "gainratio/ci"))
 
     # Then
-    assert shared.guard_call == (source, "hseshadr/ci", "b" * 40)
+    assert shared.guard_call == (source, "gainratio/ci", "b" * 40)
 
 
 def _security_recorder(

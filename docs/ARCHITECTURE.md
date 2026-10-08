@@ -30,7 +30,7 @@ For an interactive picture, open the [runtime map](architecture/index.html) (its
 ## Why consumers pin an exact commit
 
 A consumer installs a shared module at a full 40-character commit SHA, for example
-`github.com/hseshadr/ci/modules/portfolio-foundation@<sha>`. Dagger writes both `source` and
+`github.com/gainratio/ci/modules/portfolio-foundation@<sha>`. Dagger writes both `source` and
 `pin` into the consumer's `dagger.json`. The exact commit means a reviewer approved exactly
 those bytes, and a consumer does not change behavior when this repo's `main` moves. Upgrading
 is a deliberate pull request in the consumer. `main`, `latest`, tags and short SHAs are
@@ -93,7 +93,7 @@ with `--include-central`). The consumers are:
 - `edgeproc-core`
 - `privacy-core`
 
-It also fails if any other `hseshadr` repository pins a `github.com/hseshadr/ci` module but
+It also fails if any other `gainratio` or `hseshadr` repository pins a central ci module but
 is missing from that list (`uncovered-consumer`; see
 [Fleet coverage](dagger-modules.md#fleet-coverage)). Any inaccessible or incomplete evidence
 is an error: an unreadable repository becomes an `evidence-unreadable` finding rather than
@@ -109,8 +109,8 @@ For every consumer it requires:
 - the required `Dagger` check succeeded on the exact current `main` SHA;
 - managed CodeQL default setup is disabled;
 - no independent execution app controls the build or deploy path;
-- no live workflow executes a retired `hseshadr/ci` reusable control;
-- every pinned central module is on `hseshadr/ci` `main` and at or after its reviewed
+- no live workflow executes a retired `gainratio/ci` reusable control;
+- every pinned central module is on `gainratio/ci` `main` and at or after its reviewed
   required-minimum floor ([details](dagger-modules.md#required-minimum-pins));
 - no `dagger-for-github` input pastes `${{ inputs.* }}`, `${{ github.event.* }}` or
   `${{ github.head_ref }}` into the shell (`dagger-args-expression`); pass it through `env:`.
