@@ -69,8 +69,10 @@ HOSTED_SKIPPED_TESTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
         ),
     }
 )
-REPOSITORY_URL: Final = "https://github.com/hseshadr/ci.git"
-REPOSITORY: Final = "hseshadr/ci"
+#: The only identities this repository may claim during the hseshadr -> gainratio move:
+#: the canonical org first, then today's owner. A literal allow-list, never a pattern, and
+#: no default: every gate is handed the run's own `github.repository`.
+ALLOWED_REPOSITORIES: Final = ("gainratio/ci", "hseshadr/ci")
 SHA_LENGTH: Final = 40
 SOURCE_EXCLUDES: Final = [
     ".git",
@@ -110,18 +112,20 @@ class Ci:
 
     @function
     @check
-    async def ci(self, github_token: dagger.Secret, commit_sha: str = "") -> str:
+    async def ci(self, github_token: dagger.Secret, repository: str, commit_sha: str = "") -> str:
         """Run canonical quality, security, and composition gates."""
         await self._quality().sync()
         await self._module_gates()
-        await self._security(commit_sha, github_token)
+        await self._security(commit_sha, repository, github_token)
         await self._module_fixtures()
         return "central Dagger gate passed"
 
     @function
-    async def security(self, github_token: dagger.Secret, commit_sha: str = "") -> str:
+    async def security(
+        self, github_token: dagger.Secret, repository: str, commit_sha: str = ""
+    ) -> str:
         """Run the complete scheduled security graph."""
-        await self._security(commit_sha, github_token)
+        await self._security(commit_sha, repository, github_token)
         return "central Dagger security gate passed"
 
     @function
@@ -208,17 +212,21 @@ class Ci:
         base = base.with_mounted_cache("/root/.cache/uv", dag.cache_volume("ci-module-uv"))
         return base.with_workdir("/src")
 
-    async def _security(self, commit_sha: str, github_token: dagger.Secret) -> None:
+    async def _security(
+        self, commit_sha: str, repository: str, github_token: dagger.Secret
+    ) -> None:
         await self._dependency_audit().sync()
-        await (await self._repository_guard(commit_sha)).sync()
+        await (await self._repository_guard(commit_sha, repository)).sync()
         await self._zizmor(github_token).sync()
 
-    async def _repository_guard(self, commit_sha: str) -> dagger.Container:
-        exact_sha = commit_sha or await dag.git(REPOSITORY_URL).branch("main").commit()
+    async def _repository_guard(self, commit_sha: str, repository: str) -> dagger.Container:
+        self._require_repository(repository)
+        remote = f"https://github.com/{repository}.git"
+        exact_sha = commit_sha or await dag.git(remote).branch("main").commit()
         self._require_sha(exact_sha)
         return dag.foundation().guard(
             source=self.source,
-            repository=REPOSITORY,
+            repository=repository,
             commit_sha=exact_sha,
         )
 
@@ -262,6 +270,14 @@ class Ci:
         base = base.with_workdir("/src")
         base = base.with_mounted_cache("/root/.cache/uv", dag.cache_volume("ci-uv"))
         return base.with_exec(["uv", "sync", "--directory", ".dagger", "--frozen", "--all-groups"])
+
+    @staticmethod
+    def _require_repository(repository: str) -> None:
+        if repository not in ALLOWED_REPOSITORIES:
+            allowed = ", ".join(ALLOWED_REPOSITORIES)
+            raise ValueError(
+                f"{repository!r} is not an allowed repository (expected one of: {allowed})"
+            )
 
     @staticmethod
     def _require_sha(commit_sha: str) -> None:

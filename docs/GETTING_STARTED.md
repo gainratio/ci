@@ -45,7 +45,7 @@ first time).
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
-dagger call ci --github-token=env:GITHUB_TOKEN
+dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci
 ```
 
 On a clean clone of `main` that is all you need. On a branch, commit and push first, then
@@ -120,7 +120,7 @@ The steps:
 
    ```bash
    git push -u origin HEAD
-   dagger call ci --github-token=env:GITHUB_TOKEN --commit-sha=$(git rev-parse HEAD)
+   dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci --commit-sha=$(git rev-parse HEAD)
    ```
 
 6. After your PR merges, consumers do **not** pick it up automatically. In each consumer repo

@@ -99,7 +99,7 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 
    ```bash
    git clone https://github.com/hseshadr/ci && cd ci
-   dagger call ci --github-token=env:GITHUB_TOKEN
+   dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci
    ```
 
    Success ends with `central Dagger gate passed`.
@@ -135,7 +135,9 @@ dagger develop
 uv run --directory .dagger poe gate
 ```
 
-The full check, the same one CI runs, is `dagger call ci --github-token=env:GITHUB_TOKEN`.
+The full check, the same one CI runs, is
+`dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci`. CI passes its own
+`github.repository`; there is no default owner.
 On a branch, push first and add `--commit-sha=$(git rev-parse HEAD)`.
 Each module under `modules/` has its own `poe gate` too. See
 [Getting started](docs/GETTING_STARTED.md) for versions, the code map, and a worked first
