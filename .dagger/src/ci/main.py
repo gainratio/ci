@@ -70,7 +70,7 @@ HOSTED_SKIPPED_TESTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
     }
 )
 #: The only identities this repository may claim during the hseshadr -> gainratio move:
-#: the canonical org first, then today's owner. A literal allow-list, never a pattern, and
+#: the canonical org first, then the pre-move owner. A literal allow-list, never a pattern, and
 #: no default: every gate is handed the run's own `github.repository`.
 ALLOWED_REPOSITORIES: Final = ("gainratio/ci", "hseshadr/ci")
 SHA_LENGTH: Final = 40

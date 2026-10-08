@@ -47,7 +47,7 @@ class MovingMainTransport:
     main_reads: int = 0
 
     def get(self, path: str) -> HttpResponse:
-        if path != "repos/hseshadr/example/commits/main":
+        if path != "repos/gainratio/example/commits/main":
             return self.responses.get(path, HttpResponse(status=404, body="{}"))
         self.main_reads += 1
         return _json({"sha": SHA if self.main_reads == 1 else "f" * 40})
@@ -64,7 +64,7 @@ def _content(path: str, text: str) -> HttpResponse:
 
 
 def _responses() -> dict[str, HttpResponse]:
-    base = "repos/hseshadr/example"
+    base = "repos/gainratio/example"
     workflow = ".github/workflows/dagger.yml"
     module = "dagger/src/index.ts"
     config = "dagger.json"
@@ -224,7 +224,7 @@ def test_should_build_exact_snapshot_when_authoritative_endpoints_are_complete()
     transport = FakeTransport(_responses())
 
     # When the repository is read through the typed boundary
-    snapshot = read_repository(transport, "hseshadr", "example")
+    snapshot = read_repository(transport, "gainratio", "example")
 
     # Then identity and app-bound evidence remain exact
     assert snapshot.sha == SHA
@@ -239,7 +239,7 @@ def test_should_read_exact_recursive_module_and_environment_metadata() -> None:
     transport = FakeTransport(_responses())
 
     # When the authoritative repository boundary is read
-    snapshot = read_repository(transport, "hseshadr", "example")
+    snapshot = read_repository(transport, "gainratio", "example")
 
     # Then the graph, main-only production boundary, and secret names remain typed
     assert tuple(config.name for config in snapshot.dagger_configs) == (
@@ -261,14 +261,14 @@ def test_should_read_exact_recursive_module_and_environment_metadata() -> None:
 def test_should_preserve_unsupported_sdk_without_inventing_lock_metadata() -> None:
     # Given exact dagger.json selects an SDK whose generated lock contract is not reviewed
     responses = _responses()
-    path = f"repos/hseshadr/example/contents/dagger.json?ref={SHA}"
+    path = f"repos/gainratio/example/contents/dagger.json?ref={SHA}"
     payload = json.loads(responses[path].body)
     config = json.loads(base64.b64decode("".join(payload["content"].splitlines())).decode())
     config["sdk"] = {"source": "go"}
     responses[path] = _content("dagger.json", json.dumps(config))
 
     # When the typed reader assembles exact SDK evidence
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then policy receives the unsupported SDK without fabricated generated metadata
     assert snapshot.dagger_configs[0].sdk == "go"
@@ -278,7 +278,7 @@ def test_should_preserve_unsupported_sdk_without_inventing_lock_metadata() -> No
 def test_should_parse_in_progress_checks_without_treating_them_as_green() -> None:
     # Given GitHub reports an in-progress exact-main check with no conclusion yet
     responses = _responses()
-    path = f"repos/hseshadr/example/commits/{SHA}/check-runs?per_page=100"
+    path = f"repos/gainratio/example/commits/{SHA}/check-runs?per_page=100"
     payload = json.loads(responses[path].body)
     payload["total_count"] = 3
     payload["check_runs"].append(
@@ -292,7 +292,7 @@ def test_should_parse_in_progress_checks_without_treating_them_as_green() -> Non
     responses[path] = _json(payload)
 
     # When the authoritative boundary parses the live check page
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then unfinished work cannot satisfy a green check, but its app remains observable
     assert all(run.name != "Dagger fleet policy" for run in snapshot.check_runs)
@@ -302,17 +302,17 @@ def test_should_parse_in_progress_checks_without_treating_them_as_green() -> Non
 def test_should_name_minimal_scope_when_protection_read_is_forbidden() -> None:
     # Given a token that can read source but not effective protection
     responses = _responses()
-    responses["repos/hseshadr/example/branches/main/protection"] = _json(
+    responses["repos/gainratio/example/branches/main/protection"] = _json(
         {"message": "forbidden detail must stay private"}, status=403
     )
 
     # When the authoritative reader reaches the protected endpoint
     with pytest.raises(FleetAccessError) as caught:
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then it retains permission guidance without reflecting arbitrary provider text
     assert str(caught.value) == (
-        "GitHub 403 for repos/hseshadr/example/branches/main/protection; "
+        "GitHub 403 for repos/gainratio/example/branches/main/protection; "
         "token requires Administration:read"
     )
 
@@ -320,26 +320,26 @@ def test_should_name_minimal_scope_when_protection_read_is_forbidden() -> None:
 def test_should_fail_closed_when_tree_or_check_page_is_incomplete() -> None:
     # Given GitHub signals that source or check evidence was truncated
     responses = _responses()
-    responses[f"repos/hseshadr/example/git/trees/{SHA}?recursive=1"] = _json(
+    responses[f"repos/gainratio/example/git/trees/{SHA}?recursive=1"] = _json(
         {"sha": SHA, "truncated": True, "tree": []}
     )
 
     # When the repository read cannot prove completeness
     with pytest.raises(FleetAccessError, match="incomplete"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 def test_should_fail_closed_when_exact_check_page_omits_runs() -> None:
     # Given GitHub's exact-main check count exceeds the returned bounded page
     responses = _responses()
-    path = f"repos/hseshadr/example/commits/{SHA}/check-runs?per_page=100"
+    path = f"repos/gainratio/example/commits/{SHA}/check-runs?per_page=100"
     payload = json.loads(responses[path].body)
     payload["total_count"] += 1
     responses[path] = _json(payload)
 
     # When the repository reader cannot prove the complete check set
     with pytest.raises(FleetAccessError, match="incomplete authoritative check runs"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 def test_should_authenticate_exact_api_path_when_transport_reads_github() -> None:
@@ -348,23 +348,23 @@ def test_should_authenticate_exact_api_path_when_transport_reads_github() -> Non
     transport = GitHubHttpTransport("secret-token", opener)
 
     # When one repository-relative path is read
-    response = transport.get("repos/hseshadr/example/commits/main")
+    response = transport.get("repos/gainratio/example/commits/main")
 
     # Then the request uses GitHub's versioned bearer boundary and exact URL
     assert response == HttpResponse(status=200, body='{"sha":"abc"}')
     assert opener.authorization == "Bearer secret-token"
-    assert opener.url == "https://api.github.com/repos/hseshadr/example/commits/main"
+    assert opener.url == "https://api.github.com/repos/gainratio/example/commits/main"
 
 
 def test_should_accept_additive_provider_fields_when_required_evidence_is_typed() -> None:
     # Given GitHub adds an unrelated response field while required evidence remains exact
     responses = _responses()
-    responses["repos/hseshadr/example/commits/main"] = _json(
+    responses["repos/gainratio/example/commits/main"] = _json(
         {"sha": SHA, "provider-added-field": "ignored"}
     )
 
     # When the typed evidence reader selects its reviewed contract
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then provider evolution does not weaken or break the required identity
     assert snapshot.sha == SHA
@@ -376,7 +376,7 @@ def test_should_fail_closed_when_main_moves_during_authoritative_scan() -> None:
 
     # When the authoritative snapshot is assembled across that movement
     with pytest.raises(FleetAccessError, match="main moved during authoritative scan"):
-        read_repository(transport, "hseshadr", "example")
+        read_repository(transport, "gainratio", "example")
 
     # Then the scanner proved movement with an explicit final reread
     assert transport.main_reads == 2
@@ -385,8 +385,8 @@ def test_should_fail_closed_when_main_moves_during_authoritative_scan() -> None:
 @pytest.mark.parametrize(
     ("path", "field", "value"),
     [
-        (f"repos/hseshadr/example/git/trees/{SHA}?recursive=1", "truncated", "false"),
-        ("repos/hseshadr/example/environments?per_page=100", "total_count", "1"),
+        (f"repos/gainratio/example/git/trees/{SHA}?recursive=1", "truncated", "false"),
+        ("repos/gainratio/example/environments?per_page=100", "total_count", "1"),
     ],
 )
 def test_should_reject_coerced_types_at_github_boundary(path: str, field: str, value: str) -> None:
@@ -398,30 +398,30 @@ def test_should_reject_coerced_types_at_github_boundary(path: str, field: str, v
 
     # When the strict authoritative reader validates the response
     with pytest.raises(FleetAccessError, match="invalid authoritative response"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 def test_should_reject_wrong_typed_commit_identity_at_github_boundary() -> None:
     # Given authoritative string identity arrives as a JSON integer
     responses = _responses()
-    responses["repos/hseshadr/example/commits/main"] = _json({"sha": 123})
+    responses["repos/gainratio/example/commits/main"] = _json({"sha": 123})
 
     # When the exact commit identity is validated
     with pytest.raises(FleetAccessError, match="invalid authoritative response"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 def test_should_reject_wrong_typed_app_id_at_github_boundary() -> None:
     # Given the app-bound protection ID is a string rather than an integer
     responses = _responses()
-    path = "repos/hseshadr/example/branches/main/protection"
+    path = "repos/gainratio/example/branches/main/protection"
     payload = json.loads(responses[path].body)
     payload["required_status_checks"]["checks"][0]["app_id"] = "15368"
     responses[path] = _json(payload)
 
     # Then strict protection evidence rejects the coerced app identity
     with pytest.raises(FleetAccessError, match="invalid authoritative response"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 def test_should_record_missing_exact_dependency_config_without_guessing() -> None:
@@ -431,7 +431,7 @@ def test_should_record_missing_exact_dependency_config_without_guessing() -> Non
     responses[path] = _json({}, status=404)
 
     # When the recursive graph is read
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then the exact unresolved identity remains policy evidence
     assert snapshot.missing_dagger_configs == (
@@ -451,7 +451,7 @@ def test_should_terminate_recursive_cycle_while_preserving_graph_edges() -> None
                 "engineVersion": "v0.21.8",
                 "sdk": {"source": "python"},
                 "dependencies": [
-                    {"name": "consumer", "source": f"github.com/hseshadr/example@{SHA}"}
+                    {"name": "consumer", "source": f"github.com/gainratio/example@{SHA}"}
                 ],
                 "source": ".dagger",
             }
@@ -459,7 +459,7 @@ def test_should_terminate_recursive_cycle_while_preserving_graph_edges() -> None
     )
 
     # When the graph walker encounters the ancestor again
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then it terminates without dropping either loaded config
     assert tuple(config.name for config in snapshot.dagger_configs) == (
@@ -471,23 +471,23 @@ def test_should_terminate_recursive_cycle_while_preserving_graph_edges() -> None
 def test_should_model_absent_root_config_as_missing_exact_metadata() -> None:
     # Given the exact source tree has no root dagger.json
     responses = _responses()
-    tree_path = f"repos/hseshadr/example/git/trees/{SHA}?recursive=1"
+    tree_path = f"repos/gainratio/example/git/trees/{SHA}?recursive=1"
     tree = json.loads(responses[tree_path].body)
     tree["tree"] = [item for item in tree["tree"] if item["path"] != "dagger.json"]
     responses[tree_path] = _json(tree)
 
     # When the repository is read
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then absence is explicit rather than replaced with a default config
     assert snapshot.dagger_configs == ()
-    assert snapshot.missing_dagger_configs == (f"github.com/hseshadr/example@{SHA}",)
+    assert snapshot.missing_dagger_configs == (f"github.com/gainratio/example@{SHA}",)
 
 
 def test_should_resolve_local_dependency_and_not_fetch_mutable_remote() -> None:
     # Given the root has one local config and one policy-invalid mutable remote
     responses = _responses()
-    root_path = f"repos/hseshadr/example/contents/dagger.json?ref={SHA}"
+    root_path = f"repos/gainratio/example/contents/dagger.json?ref={SHA}"
     responses[root_path] = _content(
         "dagger.json",
         json.dumps(
@@ -504,7 +504,7 @@ def test_should_resolve_local_dependency_and_not_fetch_mutable_remote() -> None:
         ),
     )
     local_path = "modules/local/dagger.json"
-    responses[f"repos/hseshadr/example/contents/{local_path}?ref={SHA}"] = _content(
+    responses[f"repos/gainratio/example/contents/{local_path}?ref={SHA}"] = _content(
         local_path,
         json.dumps(
             {
@@ -516,12 +516,12 @@ def test_should_resolve_local_dependency_and_not_fetch_mutable_remote() -> None:
         ),
     )
     lock_path = "modules/local/.dagger/uv.lock"
-    responses[f"repos/hseshadr/example/contents/{lock_path}?ref={SHA}"] = _content(
+    responses[f"repos/gainratio/example/contents/{lock_path}?ref={SHA}"] = _content(
         lock_path, PYTHON_LOCK
     )
 
     # When fetchable dependency locations are resolved
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then local exact metadata is loaded and mutable remote source remains policy-only evidence
     assert tuple(config.name for config in snapshot.dagger_configs) == ("example", "local")
@@ -530,7 +530,7 @@ def test_should_resolve_local_dependency_and_not_fetch_mutable_remote() -> None:
 def test_should_preserve_unsupported_remote_as_policy_evidence_without_fetching() -> None:
     # Given dagger.json declares a non-supported remote URL form
     responses = _responses()
-    root_path = f"repos/hseshadr/example/contents/dagger.json?ref={SHA}"
+    root_path = f"repos/gainratio/example/contents/dagger.json?ref={SHA}"
     payload = json.loads(responses[root_path].body)
     decoded = json.loads(base64.b64decode("".join(payload["content"].splitlines())).decode())
     decoded["dependencies"].append(
@@ -539,7 +539,7 @@ def test_should_preserve_unsupported_remote_as_policy_evidence_without_fetching(
     responses[root_path] = _content("dagger.json", json.dumps(decoded))
 
     # When the graph reader resolves only canonical fetchable variants
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then the invalid declaration remains typed policy evidence without a fake missing config
     assert snapshot.dagger_configs[0].dependencies[-1].source.startswith("https://gitlab.com")
@@ -549,7 +549,7 @@ def test_should_preserve_unsupported_remote_as_policy_evidence_without_fetching(
 def test_should_not_fetch_noncanonical_remote_module_path() -> None:
     # Given a literal revision contains traversal and an API response exists at that raw alias
     responses = _responses()
-    root_path = f"repos/hseshadr/example/contents/dagger.json?ref={SHA}"
+    root_path = f"repos/gainratio/example/contents/dagger.json?ref={SHA}"
     payload = json.loads(responses[root_path].body)
     decoded = json.loads(base64.b64decode("".join(payload["content"].splitlines())).decode())
     revision = "b" * 40
@@ -569,7 +569,7 @@ def test_should_not_fetch_noncanonical_remote_module_path() -> None:
     )
 
     # When recursive locations are resolved before GitHub contents access
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then raw traversal is preserved only as policy evidence and never fetched
     assert tuple(config.name for config in snapshot.dagger_configs) == ("example",)
@@ -579,19 +579,19 @@ def test_should_not_fetch_noncanonical_remote_module_path() -> None:
 def test_should_skip_branch_page_when_environment_has_no_custom_policy() -> None:
     # Given an environment without any deployment branch policy
     responses = _responses()
-    path = "repos/hseshadr/example/environments?per_page=100"
+    path = "repos/gainratio/example/environments?per_page=100"
     responses[path] = _json(
         {
             "total_count": 1,
             "environments": [{"name": "preview", "deployment_branch_policy": None}],
         }
     )
-    responses["repos/hseshadr/example/environments/preview/secrets?per_page=100"] = _json(
+    responses["repos/gainratio/example/environments/preview/secrets?per_page=100"] = _json(
         {"total_count": 0, "secrets": []}
     )
 
     # When environment evidence is read
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then no unconfigured branch endpoint is invented
     assert snapshot.environments[0].branch_names == ()
@@ -600,23 +600,23 @@ def test_should_skip_branch_page_when_environment_has_no_custom_policy() -> None
 def test_should_fail_closed_when_a_bounded_metadata_page_is_incomplete() -> None:
     # Given GitHub reports more secret names than the bounded page contains
     responses = _responses()
-    path = "repos/hseshadr/example/actions/secrets?per_page=100"
+    path = "repos/gainratio/example/actions/secrets?per_page=100"
     responses[path] = _json({"total_count": 2, "secrets": [{"name": "PORTFOLIO_PAT"}]})
 
     # When the authoritative reader cannot prove the whole name inventory
     with pytest.raises(FleetAccessError, match="incomplete authoritative page"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 def test_should_name_environment_scope_without_reading_secret_values() -> None:
     # Given name-only environment secret metadata is forbidden
     responses = _responses()
-    path = "repos/hseshadr/example/environments/production/secrets?per_page=100"
+    path = "repos/gainratio/example/environments/production/secrets?per_page=100"
     responses[path] = _json({}, status=403)
 
     # When the typed reader reaches that endpoint
     with pytest.raises(FleetAccessError, match="Environments:read"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 @pytest.mark.parametrize(
@@ -642,16 +642,16 @@ def test_should_fail_closed_on_invalid_exact_dagger_metadata(
 ) -> None:
     # Given exact dagger.json metadata has the wrong identity or schema
     responses = _responses()
-    responses[f"repos/hseshadr/example/contents/dagger.json?ref={SHA}"] = response
+    responses[f"repos/gainratio/example/contents/dagger.json?ref={SHA}"] = response
 
     # When the boundary validates that config
     with pytest.raises(FleetAccessError, match=message):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")
 
 
 FLOOR = "dd19871486588b1582e432b7bc1f2cfffb296340"
-COMPARE_FLOOR = f"repos/hseshadr/ci/compare/{FLOOR}...{'b' * 40}?per_page=1"
-COMPARE_MAIN = f"repos/hseshadr/ci/compare/{'b' * 40}...main?per_page=1"
+COMPARE_FLOOR = f"repos/gainratio/ci/compare/{FLOOR}...{'b' * 40}?per_page=1"
+COMPARE_MAIN = f"repos/gainratio/ci/compare/{'b' * 40}...main?per_page=1"
 
 
 def test_should_read_floor_and_main_ancestry_for_floored_central_pin() -> None:
@@ -661,7 +661,7 @@ def test_should_read_floor_and_main_ancestry_for_floored_central_pin() -> None:
     responses[COMPARE_MAIN] = _json({"status": "ahead"})
 
     # When the repository is read
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then both comparisons are typed ancestry evidence for policy
     evidence = snapshot.pin_ancestry
@@ -674,7 +674,7 @@ def test_should_record_unrelated_history_when_compare_has_no_common_ancestor() -
     responses = _responses()
 
     # When the repository is read (both compares answer 404)
-    snapshot = read_repository(FakeTransport(responses), "hseshadr", "example")
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
 
     # Then the pin is recorded as unrelated rather than silently accepted
     assert snapshot.pin_ancestry[0].floor_status == "unrelated"
@@ -689,4 +689,4 @@ def test_should_fail_closed_when_compare_endpoint_errors() -> None:
     # When the repository is read
     # Then the scan fails instead of guessing ancestry
     with pytest.raises(FleetAccessError, match="compare"):
-        read_repository(FakeTransport(responses), "hseshadr", "example")
+        read_repository(FakeTransport(responses), "gainratio", "example")

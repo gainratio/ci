@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
         env:
-          # Engine from the GHCR mirror by digest (hseshadr/ci docs/dagger-modules.md).
+          # Engine from the GHCR mirror by digest (gainratio/ci docs/dagger-modules.md).
           _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/hseshadr/mirror/registry.dagger.io/engine:v0.21.8@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336
         with:
           version: "0.21.8"

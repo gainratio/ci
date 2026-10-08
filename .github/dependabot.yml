@@ -2,7 +2,7 @@
 # github-actions ecosystem walks `uses:` refs in .github/workflows, updating both
 # each SHA and its trailing `# v...` comment. The security-policy test keeps nested
 # composites and copy-ready examples on immutable refs as they are updated — that
-# includes our OWN hseshadr/ci refs, which must be full commit SHAs and never a
+# includes our OWN gainratio/ci refs, which must be full commit SHAs and never a
 # moving `@ci-vN` tag. Because consumers pin a SHA too, a bump reaches them when
 # they re-pin to the SHA of the next release, not automatically via a tag.
 version: 2

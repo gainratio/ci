@@ -37,8 +37,9 @@ WORKFLOW_PREFIX: Final = ".github/workflows/"
 MODULE_PREFIXES: Final = (".dagger/src/", "dagger/src/")
 HTTP_OK: Final = 200
 HTTP_NOT_FOUND: Final = 404
-# API reads only (pin ancestry compares); GitHub redirects this path after a transfer.
-CENTRAL_REPOSITORY: Final = "repos/hseshadr/ci"
+# API reads only (pin ancestry compares). Pins under either allowed owner resolve to this one
+# repository, which now lives under the gainratio org.
+CENTRAL_REPOSITORY: Final = "repos/gainratio/ci"
 
 
 @dataclass(frozen=True)

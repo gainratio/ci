@@ -2,11 +2,11 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "hseshadr/ci Runtime Architecture",
+    "title": "gainratio/ci Runtime Architecture",
     "locale": "en",
     "quality_profile": "showcase",
     "repository": {
-      "url": "https://github.com/hseshadr/ci",
+      "url": "https://github.com/gainratio/ci",
       "revision": "ece5b3c10cb9a6a762c50c413fc331951990491f"
     },
     "views": [

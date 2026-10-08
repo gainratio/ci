@@ -31,7 +31,7 @@ Traps we hit:
 ## 2. Clone, set up, run the tests
 
 ```bash
-git clone https://github.com/hseshadr/ci
+git clone https://github.com/gainratio/ci
 cd ci
 dagger develop                          # generates .dagger/sdk (about 10 s)
 uv run --directory .dagger poe gate     # lint, types, complexity, tests, coverage
@@ -45,7 +45,7 @@ first time).
 
 ```bash
 export GITHUB_TOKEN="$(gh auth token)"
-dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci
+dagger call ci --github-token=env:GITHUB_TOKEN --repository=gainratio/ci
 ```
 
 On a clean clone of `main` that is all you need. On a branch, commit and push first, then
@@ -120,7 +120,7 @@ The steps:
 
    ```bash
    git push -u origin HEAD
-   dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci --commit-sha=$(git rev-parse HEAD)
+   dagger call ci --github-token=env:GITHUB_TOKEN --repository=gainratio/ci --commit-sha=$(git rev-parse HEAD)
    ```
 
 6. After your PR merges, consumers do **not** pick it up automatically. In each consumer repo

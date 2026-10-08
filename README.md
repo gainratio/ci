@@ -1,8 +1,8 @@
-# hseshadr/ci
+# gainratio/ci
 
 The shared CI code for Harish Seshadri's own repositories: three Dagger modules they install, and a daily check that each repo still runs its CI the same way.
 
-**Try it without cloning:** `dagger -m github.com/hseshadr/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions`
+**Try it without cloning:** `dagger -m github.com/gainratio/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions`
 
 [Dagger](https://dagger.io) runs CI steps as code inside containers, so the same steps run on
 a laptop and in GitHub Actions. Harish's projects (almamesh, aml-filter, assay, edge-proc,
@@ -28,12 +28,12 @@ aml-filter's, as it is today:
 "dependencies": [
   {
     "name": "cloudflare-pages",
-    "source": "github.com/hseshadr/ci/modules/cloudflare-pages@dd19871486588b1582e432b7bc1f2cfffb296340",
+    "source": "github.com/gainratio/ci/modules/cloudflare-pages@dd19871486588b1582e432b7bc1f2cfffb296340",
     "pin": "dd19871486588b1582e432b7bc1f2cfffb296340"
   },
   {
     "name": "foundation",
-    "source": "github.com/hseshadr/ci/modules/portfolio-foundation@dd19871486588b1582e432b7bc1f2cfffb296340",
+    "source": "github.com/gainratio/ci/modules/portfolio-foundation@dd19871486588b1582e432b7bc1f2cfffb296340",
     "pin": "dd19871486588b1582e432b7bc1f2cfffb296340"
   }
 ]
@@ -61,7 +61,7 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 1. List what the foundation module offers, straight from GitHub (about 15 seconds):
 
    ```bash
-   dagger -m github.com/hseshadr/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions
+   dagger -m github.com/gainratio/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions
    ```
 
    ```text
@@ -79,8 +79,8 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 
    ```bash
    export GITHUB_TOKEN="$(gh auth token)"
-   dagger -m github.com/hseshadr/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e \
-     call green-main --github-token=env:GITHUB_TOKEN --repository=hseshadr/aml-filter serialization
+   dagger -m github.com/gainratio/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e \
+     call green-main --github-token=env:GITHUB_TOKEN --repository=gainratio/aml-filter serialization
    ```
 
    Real output from 25 Sep 2026, trimmed:
@@ -88,7 +88,7 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
    ```json
    {"app_id":15368,"branch":"main","check_name":"Dagger",
     "commit_sha":"4392391bde505a8367fea87723e4ee8ef7bc4895",
-    "repository":"hseshadr/aml-filter","workflow_path":".github/workflows/dagger.yml",
+    "repository":"gainratio/aml-filter","workflow_path":".github/workflows/dagger.yml",
     "workflow_run_id":"36177431244", ...}
    ```
 
@@ -98,8 +98,8 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 3. Run this repo's own checks from a clone (about 8 minutes):
 
    ```bash
-   git clone https://github.com/hseshadr/ci && cd ci
-   dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci
+   git clone https://github.com/gainratio/ci && cd ci
+   dagger call ci --github-token=env:GITHUB_TOKEN --repository=gainratio/ci
    ```
 
    Success ends with `central Dagger gate passed`.
@@ -136,7 +136,7 @@ uv run --directory .dagger poe gate
 ```
 
 The full check, the same one CI runs, is
-`dagger call ci --github-token=env:GITHUB_TOKEN --repository=hseshadr/ci`. CI passes its own
+`dagger call ci --github-token=env:GITHUB_TOKEN --repository=gainratio/ci`. CI passes its own
 `github.repository`; there is no default owner.
 On a branch, push first and add `--commit-sha=$(git rev-parse HEAD)`.
 Each module under `modules/` has its own `poe gate` too. See

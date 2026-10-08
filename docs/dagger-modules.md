@@ -16,7 +16,7 @@ After the guarded central release is merged, run this from the consumer module r
 set -euo pipefail
 
 FOUNDATION_SHA="$(
-  git ls-remote https://github.com/hseshadr/ci.git refs/heads/main | cut -f1
+  git ls-remote https://github.com/gainratio/ci.git refs/heads/main | cut -f1
 )"
 if [[ ! "$FOUNDATION_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   printf 'central main did not resolve to one lowercase 40-character SHA\n' >&2
@@ -24,7 +24,7 @@ if [[ ! "$FOUNDATION_SHA" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 
 dagger install \
-  "github.com/hseshadr/ci/modules/portfolio-foundation@$FOUNDATION_SHA" \
+  "github.com/gainratio/ci/modules/portfolio-foundation@$FOUNDATION_SHA" \
   --name foundation
 dagger develop
 ```
@@ -37,7 +37,7 @@ shape (the example SHA is illustrative):
   "dependencies": [
     {
       "name": "foundation",
-      "source": "github.com/hseshadr/ci/modules/portfolio-foundation@0123456789abcdef0123456789abcdef01234567",
+      "source": "github.com/gainratio/ci/modules/portfolio-foundation@0123456789abcdef0123456789abcdef01234567",
       "pin": "0123456789abcdef0123456789abcdef01234567"
     }
   ]
@@ -63,7 +63,7 @@ reviewed floor per central module in `REQUIRED_MINIMUM` (`.dagger/src/ci/fleet_p
 the foundation floor also applies to pins of those modules.
 
 For every floored module revision in a consumer's resolved Dagger graph, the scanner asks
-GitHub `compare/<floor>...<pin>` and `compare/<pin>...main` on `hseshadr/ci`. Both must answer
+GitHub `compare/<floor>...<pin>` and `compare/<pin>...main` on `gainratio/ci`. Both must answer
 `ahead` or `identical`: the pin is at or after the floor **and** on central `main`. Anything
 else (`behind`, `diverged`, no common history, or missing evidence) is a
 `pin-below-required-minimum` finding that fails the check.
@@ -82,7 +82,7 @@ Pages consumers install the provider from the **same reviewed commit** and regen
 
 ```bash
 dagger install \
-  "github.com/hseshadr/ci/modules/cloudflare-pages@$FOUNDATION_SHA" \
+  "github.com/gainratio/ci/modules/cloudflare-pages@$FOUNDATION_SHA" \
   --name cloudflare-pages
 dagger develop
 ```
@@ -91,7 +91,7 @@ Python package consumers install the candidate builder from that same reviewed c
 
 ```bash
 dagger install \
-  "github.com/hseshadr/ci/modules/python-package@$FOUNDATION_SHA" \
+  "github.com/gainratio/ci/modules/python-package@$FOUNDATION_SHA" \
   --name python-package
 dagger develop
 ```
@@ -183,7 +183,7 @@ jobs:
         with:
           version: "0.21.8"
           verb: call
-          module: github.com/hseshadr/ci/modules/portfolio-foundation@3de1c4bef2558fd6610b6dda1504b657de7a954d
+          module: github.com/gainratio/ci/modules/portfolio-foundation@3de1c4bef2558fd6610b6dda1504b657de7a954d
           args: release-lineage --github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" --head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -570,9 +570,10 @@ file alone is not release evidence.
 
 The fleet scan checks only the repositories named in `repository_expectations`
 (`.dagger/src/ci/fleet.py`). That list is written by hand, so a new consumer would otherwise
-escape every fleet check. To close that gap, each hosted scan first lists every public
-`hseshadr` repository, reads its default-branch `dagger.json`, and reports
-`uncovered-consumer` for any active repository that pins a `github.com/hseshadr/ci` module but is
+escape every fleet check. To close that gap, each hosted scan first lists every repository
+under both allowed owners (the `gainratio` org and the pre-move `hseshadr` account), reads its
+default-branch `dagger.json`, and reports `uncovered-consumer` for any active repository that
+pins a central ci module (under either owner) but is
 missing from the list. The scan then fails.
 
 - **When you onboard a consumer, add it to `repository_expectations` in the same PR.** Also add
@@ -586,13 +587,13 @@ missing from the list. The scan then fails.
 
 **TL;DR:** before a `workflow_run` publisher trusts a candidate artifact, it calls
 `portfolio-foundation`'s `release-lineage` (PyPI) or `release-provenance` (npm) at a literal
-`hseshadr/ci` SHA. The call fails unless GitHub's own run records show the candidate came
+`gainratio/ci` SHA. The call fails unless GitHub's own run records show the candidate came
 from `main`.
 
 **Why:** the publisher's `head_branch == default_branch` gate also passes for a
 `workflow_dispatch` on a *tag* named `main`. That tag's commit, and the
 `release-candidate.yml` it runs, are whatever the tagger wrote. Without a lineage check,
-the `main` publisher would publish those bytes over OIDC (hseshadr/ci#49).
+the `main` publisher would publish those bytes over OIDC (gainratio/ci#49).
 
 The function reads the triggering run and the running publish run, then requires all of:
 
@@ -617,13 +618,13 @@ The fleet policy accepts exactly this leading step and nothing weaker (`publishe
         with:
           version: "0.21.8"
           verb: call
-          module: github.com/hseshadr/ci/modules/portfolio-foundation@<40-hex ci SHA>
+          module: github.com/gainratio/ci/modules/portfolio-foundation@<40-hex ci SHA>
           args: release-lineage --github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" --head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"
 ```
 
 For npm, use `release-provenance` with the same arguments plus
 `export --path=github-context.json`, then load the repository's own publisher at
-`github.com/hseshadr/<repo>@${{ github.sha }}` (the `main` commit the workflow runs on, never
+`github.com/gainratio/<repo>@${{ github.sha }}` (the `main` commit the workflow runs on, never
 the candidate's SHA). The steps are then lineage → download → publish, with no `run:` step.
 
 **Expressions in Dagger inputs.** `dagger-for-github` pastes `args`, `call`, `shell`,

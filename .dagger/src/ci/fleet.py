@@ -15,9 +15,9 @@ from ci.fleet_policy import (
 )
 from ci.github_fleet import FleetAccessError, GitHubHttpTransport, GitHubTransport, read_repository
 
-# Reviewed repositories are read under hseshadr; after a transfer GitHub's API redirects the
-# old path. Coverage discovery lists both allowed owners so a moved consumer stays in view.
-OWNER = "hseshadr"
+# Reviewed repositories are read under the gainratio org, where the fleet now lives. Coverage
+# discovery still lists both allowed owners so a consumer left under hseshadr stays in view.
+OWNER = "gainratio"
 
 
 @dataclass(frozen=True)
