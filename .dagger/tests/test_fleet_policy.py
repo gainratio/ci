@@ -12,6 +12,7 @@ from ci.fleet_policy import (
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
+    PendingCheck,
     PinAncestry,
     PolicyFinding,
     Protection,
@@ -464,6 +465,68 @@ def test_should_reject_missing_or_wrong_branch_protection_integration() -> None:
 
     # Then projections and stale checks cannot look healthy
     assert {"required-check-app", "main-integration"} <= set(codes)
+
+
+GREEN = CheckRun(name="Dagger", app_id=15368, head_sha=SHA, conclusion="success")
+RED = CheckRun(name="Dagger", app_id=15368, head_sha=SHA, conclusion="failure")
+RUNNING = PendingCheck(name="Dagger", app_id=15368, head_sha=SHA)
+
+
+def _integration(runs: tuple[CheckRun, ...], pending: tuple[PendingCheck, ...]) -> tuple[str, ...]:
+    snapshot = replace(_snapshot(INGRESS), check_runs=runs, pending_check_runs=pending)
+    return tuple(code for code in _codes(snapshot) if code == "main-integration")
+
+
+def test_should_treat_running_exact_main_check_as_pending_not_failed() -> None:
+    # Given main just moved and its only Dagger check is still queued or in progress
+    # When exact-main integration is evaluated
+    codes = _integration((), (RUNNING,))
+
+    # Then the race is pending, not a red main
+    assert codes == ()
+
+
+def test_should_still_report_completed_failure_while_a_rerun_is_running() -> None:
+    # Given exact main has a completed red Dagger check and a rerun in progress
+    # When exact-main integration is evaluated
+    codes = _integration((RED,), (RUNNING,))
+
+    # Then the completed failure is never hidden by pending work
+    assert codes == ("main-integration",)
+
+
+def test_should_report_completed_failure_on_exact_main() -> None:
+    # Given exact main finished red
+    # When / Then a completed failure is always a finding
+    assert _integration((RED,), ()) == ("main-integration",)
+
+
+def test_should_fail_closed_when_exact_main_has_no_check_at_all() -> None:
+    # Given no completed and no running Dagger check exists on exact main
+    # When / Then a never-triggered integration is a finding, not pending
+    assert _integration((), ()) == ("main-integration",)
+
+
+@pytest.mark.parametrize(
+    "pending",
+    [
+        PendingCheck(name="Dagger", app_id=7, head_sha=SHA),
+        PendingCheck(name="Dagger", app_id=15368, head_sha="b" * 40),
+        PendingCheck(name="Other", app_id=15368, head_sha=SHA),
+    ],
+)
+def test_should_ignore_pending_checks_from_wrong_app_commit_or_context(
+    pending: PendingCheck,
+) -> None:
+    # Given pending work that is not the protected exact-main context
+    # When / Then it cannot defer the missing integration
+    assert _integration((), (pending,)) == ("main-integration",)
+
+
+def test_should_keep_green_exact_main_green() -> None:
+    # Given a successful exact-main check (with an unrelated rerun running)
+    # When / Then there is no integration finding
+    assert _integration((GREEN,), (RUNNING,)) == ()
 
 
 def test_should_reject_legacy_central_execution_reference() -> None:

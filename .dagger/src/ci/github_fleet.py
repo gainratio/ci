@@ -22,6 +22,7 @@ from ci.fleet_policy import (
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
+    PendingCheck,
     PinAncestry,
     Protection,
     RepositorySnapshot,
@@ -836,6 +837,7 @@ def create_snapshot(parts: SnapshotParts, projection: SnapshotProjection) -> Rep
         environments=parts.environments,
         repository_secret_names=parts.repository_secrets,
         pin_ancestry=evidence.ancestry,
+        pending_check_runs=build_pending_check_runs(parts.checks),
     )
 
 
@@ -882,6 +884,15 @@ def select_modules(sources: tuple[SourceFile, ...]) -> tuple[SourceFile, ...]:
 def build_check_runs(checks: CheckRunsPayload) -> tuple[CheckRun, ...]:
     """Translate only concluded checks into greenable domain evidence."""
     return tuple(to_check_run(item) for item in checks.check_runs if item.conclusion is not None)
+
+
+def build_pending_check_runs(checks: CheckRunsPayload) -> tuple[PendingCheck, ...]:
+    """Keep queued or in-progress checks apart so they can never count as green."""
+    return tuple(
+        PendingCheck(name=item.name, app_id=item.app.id, head_sha=item.head_sha)
+        for item in checks.check_runs
+        if item.conclusion is None
+    )
 
 
 def build_check_apps(checks: CheckRunsPayload) -> tuple[CheckApp, ...]:

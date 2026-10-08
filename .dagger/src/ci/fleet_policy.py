@@ -202,6 +202,15 @@ class CheckRun:
 
 
 @validated_dataclass(config=BOUNDARY_CONFIG)
+class PendingCheck:
+    """One exact-commit check run GitHub reports as queued or in progress."""
+
+    name: str
+    app_id: int
+    head_sha: str
+
+
+@validated_dataclass(config=BOUNDARY_CONFIG)
 class Protection:
     """Effective classic branch protection returned by GitHub."""
 
@@ -372,6 +381,7 @@ class RepositorySnapshot:
     environments: tuple[DeploymentEnvironment, ...] = Field(default_factory=tuple)
     repository_secret_names: tuple[str, ...] = Field(default_factory=tuple)
     pin_ancestry: tuple[PinAncestry, ...] = Field(default_factory=tuple)
+    pending_check_runs: tuple[PendingCheck, ...] = Field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -1950,21 +1960,40 @@ def validate_protection_flags(
 def validate_integrations(
     snapshot: RepositorySnapshot, expectation: RepositoryExpectation
 ) -> tuple[PolicyFinding, ...]:
-    """Require each protected context green from GitHub Actions on exact main."""
+    """Require each protected context green from GitHub Actions on exact main.
+
+    A context whose only exact-main evidence is a queued or in-progress run is
+    pending, not red: main just moved and its check has not finished. Any
+    completed non-success, or no run at all, is still a finding.
+    """
     for context in expectation.required_contexts:
-        if not has_green_integration(snapshot, context):
+        if not integration_is_acceptable(snapshot, context):
             return (finding("main-integration", snapshot.name, context),)
     return ()
 
 
-def has_green_integration(snapshot: RepositorySnapshot, context: str) -> bool:
-    """Return whether one exact-main app-bound check is successful."""
-    return any(
-        run.name == context
-        and run.app_id == APP_ID
-        and run.head_sha == snapshot.sha
-        and run.conclusion == "success"
+def integration_is_acceptable(snapshot: RepositorySnapshot, context: str) -> bool:
+    """Return whether one context is green, or only pending with no completed red."""
+    completed = exact_main_conclusions(snapshot, context)
+    if "success" in completed:
+        return True
+    return not completed and has_pending_integration(snapshot, context)
+
+
+def exact_main_conclusions(snapshot: RepositorySnapshot, context: str) -> tuple[str, ...]:
+    """Return every completed exact-main app-bound conclusion for one context."""
+    return tuple(
+        run.conclusion
         for run in snapshot.check_runs
+        if (run.name, run.app_id, run.head_sha) == (context, APP_ID, snapshot.sha)
+    )
+
+
+def has_pending_integration(snapshot: RepositorySnapshot, context: str) -> bool:
+    """Return whether one exact-main app-bound check is still queued or running."""
+    return any(
+        (run.name, run.app_id, run.head_sha) == (context, APP_ID, snapshot.sha)
+        for run in snapshot.pending_check_runs
     )
 
 
