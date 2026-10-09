@@ -361,12 +361,12 @@ ordering.
 
 ## Pull images from the GHCR mirror
 
-**TL;DR:** the shared modules pull every image from `ghcr.io/hseshadr/mirror/...` by digest, so
+**TL;DR:** the shared modules pull every image from `ghcr.io/gainratio/mirror/...` by digest, so
 a Docker Hub or `registry.dagger.io` outage no longer fails CI. A consumer adopts it with two
 edits.
 
 `mirror/images.json` lists each upstream image and its digest. `image-mirror.yml` copies them
-with `crane copy` to `ghcr.io/hseshadr/mirror/<upstream host>/<upstream path>:<tag>`. Then it
+with `crane copy` to `ghcr.io/gainratio/mirror/<upstream host>/<upstream path>:<tag>`. Then it
 checks that the copy has the same digest and pulls anonymously. The bytes are the same as
 upstream. Only the registry changes.
 
@@ -379,7 +379,7 @@ upstream. Only the registry changes.
    ```yaml
    - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
      env:
-       _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/hseshadr/mirror/registry.dagger.io/engine:v0.21.8@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336
+       _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.8@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336
      with:
        version: "0.21.8"
    ```
@@ -391,7 +391,7 @@ upstream. Only the registry changes.
 
    ```toml
    [tool.dagger]
-   base-image = "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.14-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
+   base-image = "ghcr.io/gainratio/mirror/docker.io/library/python:3.13.14-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
    ```
 
 3. TypeScript modules: set `"dagger": {"baseImage": "<mirror pin>"}` in the module's
@@ -405,7 +405,7 @@ upstream. Only the registry changes.
    `XDG_CONFIG_HOME: ${{ github.workspace }}/.github/xdg` on every Dagger step:
 
    ```json
-   {"registries": {"docker.io": {"mirrors": ["ghcr.io/hseshadr/mirror/docker.io", "mirror.gcr.io"]}}}
+   {"registries": {"docker.io": {"mirrors": ["ghcr.io/gainratio/mirror/docker.io", "mirror.gcr.io"]}}}
    ```
 
 Point your own image constants at the mirror the same way. To add an image, add it to

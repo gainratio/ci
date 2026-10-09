@@ -13,7 +13,6 @@ import pytest
 
 from ci import image_mirror
 from ci.image_mirror import (
-    MIRROR_ROOT,
     CraneResult,
     MirrorImage,
     load_manifest,
@@ -27,8 +26,6 @@ MANIFEST = ROOT / "mirror" / "images.json"
 DIGEST = "sha256:" + "a" * 64
 OTHER_DIGEST = "sha256:" + "b" * 64
 IMAGE_REF = re.compile(r"(?:[a-z0-9.-]+/)*[a-z0-9._-]+(?::[\w.-]+)?@sha256:[0-9a-f]{64}")
-# Transition: code pulls the hseshadr copies until the gainratio copies are proven public.
-CONSUMED_ROOT = "ghcr.io/hseshadr/mirror"
 SCANNED = (".dagger/src", "modules/*/.dagger/src", "tests/dagger/python_consumer/.dagger/src")
 
 
@@ -248,7 +245,7 @@ def test_should_mirror_every_image_pinned_by_central_and_shared_module_code() ->
     # When each ref is matched to a manifest entry by repository and digest
     images = load_manifest(MANIFEST.read_text())
     known = {_identity(image.source_ref) for image in images}
-    known |= {_identity(image.pin.replace(MIRROR_ROOT, CONSUMED_ROOT, 1)) for image in images}
+    known |= {_identity(image.pin) for image in images}
     missing = sorted(ref for ref in pinned if _identity(ref) not in known)
 
     # Then nothing pinned in code is absent from the mirror

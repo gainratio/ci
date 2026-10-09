@@ -15,11 +15,7 @@ from ci.main import MIRROR_BOOTSTRAP_IMAGE
 
 ROOT = Path(__file__).parents[2]
 IMAGES = load_manifest((ROOT / "mirror" / "images.json").read_text())
-# Transition: the mirror now publishes under the gainratio org, but code keeps pulling the
-# hseshadr copies until the gainratio copies are proven public. The follow-up PR sets this to
-# MIRROR_ROOT and repoints every pin.
-CONSUMED_ROOT = "ghcr.io/hseshadr/mirror"
-PINS = frozenset(image.pin.replace(MIRROR_ROOT, CONSUMED_ROOT, 1) for image in IMAGES)
+PINS = frozenset(image.pin for image in IMAGES)
 IMAGE_REF = re.compile(r"(?:[a-z0-9.-]+/)*[a-z0-9._-]+(?::[\w.-]+)?@sha256:[0-9a-f]{64}")
 SOURCES = (
     ".dagger/src",
@@ -39,8 +35,7 @@ HASH_IDENTITY = "alpine@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045
 
 
 def _pin(source: str) -> str:
-    pin = next(image.pin for image in IMAGES if image.source == source)
-    return pin.replace(MIRROR_ROOT, CONSUMED_ROOT, 1)
+    return next(image.pin for image in IMAGES if image.source == source)
 
 
 def _image_constants() -> dict[str, str]:
@@ -117,7 +112,7 @@ def test_should_mirror_docker_hub_in_the_engine_config() -> None:
     # Then Docker Hub pulls try the GHCR mirror, then Google's Docker Hub cache, before
     # docker.io; the TypeScript SDK's bun introspector image can be redirected no other way
     assert config == {
-        "registries": {"docker.io": {"mirrors": [CONSUMED_ROOT + "/docker.io", "mirror.gcr.io"]}}
+        "registries": {"docker.io": {"mirrors": [MIRROR_ROOT + "/docker.io", "mirror.gcr.io"]}}
     }
 
 

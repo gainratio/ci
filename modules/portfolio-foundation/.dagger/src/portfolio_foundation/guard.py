@@ -10,11 +10,11 @@ from dagger import dag
 from .source import SourceBinding
 
 ACTIONLINT_IMAGE: Final = (
-    "ghcr.io/hseshadr/mirror/docker.io/rhysd/actionlint:1.7.10@sha256:"
+    "ghcr.io/gainratio/mirror/docker.io/rhysd/actionlint:1.7.10@sha256:"
     "ef8299f97635c4c30e2298f48f30763ab782a4ad2c95b744649439a039421e36"
 )
 GITLEAKS_IMAGE: Final = (
-    "ghcr.io/hseshadr/mirror/ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:"
+    "ghcr.io/gainratio/mirror/ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:"
     "c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
 )
 ACTIONLINT_PATH: Final = "/usr/local/bin/actionlint"

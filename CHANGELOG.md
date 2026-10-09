@@ -9,6 +9,9 @@
   (`DENIED: The requested installation does not exist`, run 37993357418, 12/16 proven).
   Private-package hints now link the org package page. Code keeps pulling the `hseshadr`
   copies until the `gainratio` copies are proven public; a follow-up PR repoints every pin.
+- Every central workflow, module, fixture, and the engine config now pull from
+  `ghcr.io/gainratio/mirror/...` (same digests). The transitional `CONSUMED_ROOT` in the mirror
+  contract tests is gone, so a pin left on `hseshadr` fails the contract again.
 - The foundation guard now passes the consumer's `.github/actionlint.yaml` (or `.yml`) to
   actionlint with `-config-file`. The guard lints a snapshot without `.git`, so actionlint never
   found the config on its own and rejected declared self-hosted labels such as
