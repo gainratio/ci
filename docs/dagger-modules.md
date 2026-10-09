@@ -399,10 +399,13 @@ upstream. Only the registry changes.
    always run `oven/bun:1.3.0-alpine` and ignore `baseImage`
    (`sdk/typescript/runtime/introspector.go`, v0.21.8), so also give the engine a Docker Hub
    mirror. The CLI mounts `$XDG_CONFIG_HOME/dagger/engine.json` into the engine it starts
-   (`engine/client/drivers/container.go`), and the engine tries each mirror before Docker Hub:
+   (`engine/client/drivers/container.go`), and the engine tries each mirror before Docker Hub.
+   `mirror.gcr.io` is Google's Docker Hub cache, the fallback for an image not yet mirrored.
+   Commit it as `.github/xdg/dagger/engine.json` and set
+   `XDG_CONFIG_HOME: ${{ github.workspace }}/.github/xdg` on every Dagger step:
 
    ```json
-   {"registries": {"docker.io": {"mirrors": ["ghcr.io/hseshadr/mirror/docker.io"]}}}
+   {"registries": {"docker.io": {"mirrors": ["ghcr.io/hseshadr/mirror/docker.io", "mirror.gcr.io"]}}}
    ```
 
 Point your own image constants at the mirror the same way. To add an image, add it to

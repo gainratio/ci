@@ -1,0 +1,1 @@
+{"registries": {"docker.io": {"mirrors": ["ghcr.io/hseshadr/mirror/docker.io", "mirror.gcr.io"]}}}

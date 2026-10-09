@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import tomllib
 from pathlib import Path
 
 import yaml
 
-from ci.image_mirror import load_manifest
+from ci.image_mirror import MIRROR_ROOT, load_manifest
 from ci.main import MIRROR_BOOTSTRAP_IMAGE
 
 ROOT = Path(__file__).parents[2]
@@ -98,3 +99,33 @@ def test_should_start_central_dagger_engines_from_the_mirror() -> None:
     # Then every Dagger step provisions its engine from the digest-pinned mirror copy
     assert len(steps) >= 5
     assert {step.get("env", {}).get(RUNNER_HOST) for step in steps} == {expected}
+
+
+ENGINE_CONFIG = ROOT / ".github" / "xdg" / "dagger" / "engine.json"
+XDG_CONFIG_HOME = "${{ github.workspace }}/.github/xdg"
+
+
+def test_should_mirror_docker_hub_in_the_engine_config() -> None:
+    # Given the engine config the Dagger CLI mounts from $XDG_CONFIG_HOME/dagger/engine.json
+    config = json.loads(ENGINE_CONFIG.read_text())
+
+    # Then Docker Hub pulls try the GHCR mirror, then Google's Docker Hub cache, before
+    # docker.io; the TypeScript SDK's bun introspector image can be redirected no other way
+    assert config == {
+        "registries": {"docker.io": {"mirrors": [MIRROR_ROOT + "/docker.io", "mirror.gcr.io"]}}
+    }
+
+
+def test_should_mount_the_engine_config_on_every_central_dagger_step() -> None:
+    # Given every Dagger step in the central workflows
+    steps = [
+        step
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        for job in yaml.safe_load(path.read_text())["jobs"].values()
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("dagger/dagger-for-github@")
+    ]
+
+    # Then each one points XDG_CONFIG_HOME at the committed engine config
+    assert len(steps) >= 7
+    assert {step.get("env", {}).get("XDG_CONFIG_HOME") for step in steps} == {XDG_CONFIG_HOME}
