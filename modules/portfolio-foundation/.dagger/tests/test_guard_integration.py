@@ -32,8 +32,7 @@ FIXTURE_PATHS = (
     Path("frontend/packages/browser/integration/parity.mjs"),
 )
 CUSTOM_RUNNER_WORKFLOW = (
-    "on: push\njobs:\n  build:\n    runs-on: custom-runner-4\n"
-    "    steps:\n      - run: echo ok\n"
+    "on: push\njobs:\n  build:\n    runs-on: custom-runner-4\n    steps:\n      - run: echo ok\n"
 )
 CUSTOM_RUNNER_CONFIG = "self-hosted-runner:\n  labels:\n    - custom-runner-4\n"
 PAYLOAD_PARTS = (
