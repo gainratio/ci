@@ -31,6 +31,26 @@
       "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/node"
     },
     {
+      "source": "docker.io/library/node:24.13.1-alpine",
+      "digest": "sha256:4f696fbf39f383c1e486030ba6b289a5d9af541642fc78ab197e584a113b9c03",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/node"
+    },
+    {
+      "source": "docker.io/library/node:22-trixie-slim",
+      "digest": "sha256:7b8a0c89c54499bee567618f96578e1a12a800f062fbdbfd1fb6a443fa6f6284",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/node"
+    },
+    {
+      "source": "docker.io/oven/bun:1.3.0-alpine",
+      "digest": "sha256:37e6b1cbe053939bccf6ae4507977ed957eaa6e7f275670b72ad6348e0d2c11f",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/oven/bun"
+    },
+    {
+      "source": "docker.io/oven/bun:1.3.5",
+      "digest": "sha256:e90cdbaf9ccdb3d4bd693aa335c3310a6004286a880f62f79b18f9b1312a8ec3",
+      "mirror": "ghcr.io/hseshadr/mirror/docker.io/oven/bun"
+    },
+    {
       "source": "docker.io/curlimages/curl:8.16.0",
       "digest": "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6",
       "mirror": "ghcr.io/hseshadr/mirror/docker.io/curlimages/curl"
