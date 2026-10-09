@@ -12,13 +12,23 @@ from pathlib import Path
 import pytest
 
 from ci import image_mirror
-from ci.image_mirror import CraneResult, MirrorImage, load_manifest, main, sync, verify_upstream
+from ci.image_mirror import (
+    MIRROR_ROOT,
+    CraneResult,
+    MirrorImage,
+    load_manifest,
+    main,
+    sync,
+    verify_upstream,
+)
 
 ROOT = Path(__file__).parents[2]
 MANIFEST = ROOT / "mirror" / "images.json"
 DIGEST = "sha256:" + "a" * 64
 OTHER_DIGEST = "sha256:" + "b" * 64
 IMAGE_REF = re.compile(r"(?:[a-z0-9.-]+/)*[a-z0-9._-]+(?::[\w.-]+)?@sha256:[0-9a-f]{64}")
+# Transition: code pulls the hseshadr copies until the gainratio copies are proven public.
+CONSUMED_ROOT = "ghcr.io/hseshadr/mirror"
 SCANNED = (".dagger/src", "modules/*/.dagger/src", "tests/dagger/python_consumer/.dagger/src")
 
 
@@ -39,7 +49,7 @@ def _entry(**overrides: str) -> dict[str, str]:
     entry = {
         "source": "docker.io/library/python:3.13.14-slim",
         "digest": DIGEST,
-        "mirror": "ghcr.io/hseshadr/mirror/docker.io/library/python",
+        "mirror": "ghcr.io/gainratio/mirror/docker.io/library/python",
     }
     return {**entry, **overrides}
 
@@ -58,10 +68,10 @@ def test_should_derive_source_mirror_and_package_refs_from_one_entry() -> None:
 
     # Then the copy source is digest-only and the pin keeps the upstream tag for humans
     assert image.source_ref == f"docker.io/library/python@{DIGEST}"
-    assert image.mirror_tag_ref == "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.14-slim"
+    assert image.mirror_tag_ref == "ghcr.io/gainratio/mirror/docker.io/library/python:3.13.14-slim"
     assert image.pin == f"{image.mirror_tag_ref}@{DIGEST}"
     assert image.package_url == (
-        "https://github.com/users/hseshadr/packages/container/package/"
+        "https://github.com/orgs/gainratio/packages/container/package/"
         "mirror%2Fdocker.io%2Flibrary%2Fpython"
     )
 
@@ -74,8 +84,9 @@ def test_should_derive_source_mirror_and_package_refs_from_one_entry() -> None:
         ({"source": "python:3.13.14-slim"}, "registry host"),
         ({"source": "docker.io/library/python"}, "tag"),
         ({"source": f"docker.io/library/python@{DIGEST}"}, "tag"),
-        ({"mirror": "ghcr.io/hseshadr/mirror/python"}, "mirror path"),
+        ({"mirror": "ghcr.io/gainratio/mirror/python"}, "mirror path"),
         ({"mirror": "ghcr.io/someone/mirror/docker.io/library/python"}, "mirror path"),
+        ({"mirror": "ghcr.io/hseshadr/mirror/docker.io/library/python"}, "mirror path"),
     ],
 )
 def test_should_refuse_entries_that_break_the_digest_and_path_rules(
@@ -237,7 +248,7 @@ def test_should_mirror_every_image_pinned_by_central_and_shared_module_code() ->
     # When each ref is matched to a manifest entry by repository and digest
     images = load_manifest(MANIFEST.read_text())
     known = {_identity(image.source_ref) for image in images}
-    known |= {_identity(image.pin) for image in images}
+    known |= {_identity(image.pin.replace(MIRROR_ROOT, CONSUMED_ROOT, 1)) for image in images}
     missing = sorted(ref for ref in pinned if _identity(ref) not in known)
 
     # Then nothing pinned in code is absent from the mirror
