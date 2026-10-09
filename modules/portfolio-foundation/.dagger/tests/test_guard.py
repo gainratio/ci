@@ -93,7 +93,7 @@ def test_should_require_nonempty_workflow_input() -> None:
 
 FAKE_ACTIONLINT = '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$(dirname "$0")/argv"\n'
 WORKFLOW = (
-    "on: push\njobs:\n  build:\n    runs-on: depot-ubuntu-24.04-4\n    steps:\n      - run: true\n"
+    "on: push\njobs:\n  build:\n    runs-on: custom-runner-4\n    steps:\n      - run: true\n"
 )
 
 
@@ -102,7 +102,7 @@ def _consumer(tmp_path: Path, config_name: str | None) -> Path:
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / ".github" / "workflows" / "ci.yml").write_text(WORKFLOW)
     if config_name is not None:
-        (root / ".github" / config_name).write_text("self-hosted-runner:\n  labels: [depot-*]\n")
+        (root / ".github" / config_name).write_text("self-hosted-runner:\n  labels: [custom-*]\n")
     return root
 
 

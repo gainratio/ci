@@ -31,11 +31,10 @@ FIXTURE_PATHS = (
     Path("backend/tests/test_predictive_golden.py"),
     Path("frontend/packages/browser/integration/parity.mjs"),
 )
-DEPOT_WORKFLOW = (
-    "on: push\njobs:\n  build:\n    runs-on: depot-ubuntu-24.04-4\n"
-    "    steps:\n      - run: echo ok\n"
+CUSTOM_RUNNER_WORKFLOW = (
+    "on: push\njobs:\n  build:\n    runs-on: custom-runner-4\n    steps:\n      - run: echo ok\n"
 )
-DEPOT_CONFIG = "self-hosted-runner:\n  labels:\n    - depot-ubuntu-24.04-4\n"
+CUSTOM_RUNNER_CONFIG = "self-hosted-runner:\n  labels:\n    - custom-runner-4\n"
 PAYLOAD_PARTS = (
     "616c6d616d6573682d7061726974792d",
     "666978747572652d7369676e65723030",
@@ -293,12 +292,12 @@ def test_should_reject_a_snapshot_copy_despite_historical_allowlist(tmp_path: Pa
     _assert_two_generic_api_keys(result)
 
 
-def _depot_consumer(tmp_path: Path, *, config: bool) -> Path:
+def _custom_runner_consumer(tmp_path: Path, *, config: bool) -> Path:
     snapshot = tmp_path / "snapshot"
     (snapshot / ".github" / "workflows").mkdir(parents=True)
-    (snapshot / ".github" / "workflows" / "ci.yml").write_text(DEPOT_WORKFLOW)
+    (snapshot / ".github" / "workflows" / "ci.yml").write_text(CUSTOM_RUNNER_WORKFLOW)
     if config:
-        (snapshot / ".github" / "actionlint.yaml").write_text(DEPOT_CONFIG)
+        (snapshot / ".github" / "actionlint.yaml").write_text(CUSTOM_RUNNER_CONFIG)
     return snapshot
 
 
@@ -311,7 +310,7 @@ def _actionlint(snapshot: Path) -> subprocess.CompletedProcess[str]:
 
 def test_should_accept_self_hosted_label_declared_in_consumer_config(tmp_path: Path) -> None:
     # Given
-    snapshot = _depot_consumer(tmp_path, config=True)
+    snapshot = _custom_runner_consumer(tmp_path, config=True)
 
     # When
     result = _actionlint(snapshot)
@@ -322,11 +321,11 @@ def test_should_accept_self_hosted_label_declared_in_consumer_config(tmp_path: P
 
 def test_should_reject_unknown_self_hosted_label_without_consumer_config(tmp_path: Path) -> None:
     # Given
-    snapshot = _depot_consumer(tmp_path, config=False)
+    snapshot = _custom_runner_consumer(tmp_path, config=False)
 
     # When
     result = _actionlint(snapshot)
 
     # Then
     assert result.returncode != 0, "unknown runner label unexpectedly passed"
-    assert 'label "depot-ubuntu-24.04-4" is unknown' in result.stdout
+    assert 'label "custom-runner-4" is unknown' in result.stdout
