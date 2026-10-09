@@ -1,6 +1,6 @@
 name: GHCR image mirror
 
-# Copies every image in mirror/images.json to ghcr.io/hseshadr/mirror/<upstream> by digest,
+# Copies every image in mirror/images.json to ghcr.io/gainratio/mirror/<upstream> by digest,
 # then proves the mirror tag resolves to the same digest and pulls anonymously.
 # PRs only check that each pinned upstream digest exists; nothing is written from a PR.
 on:
@@ -51,7 +51,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: write # Push mirror copies to ghcr.io/hseshadr/mirror/*.
+      packages: write # Push mirror copies to ghcr.io/gainratio/mirror/*.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

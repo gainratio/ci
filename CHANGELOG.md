@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- The image mirror now publishes to `ghcr.io/gainratio/mirror/...`. Since the org move, ci's
+  `GITHUB_TOKEN` cannot create packages under the `hseshadr` user account
+  (`DENIED: The requested installation does not exist`, run 37993357418, 12/16 proven).
+  Private-package hints now link the org package page. Code keeps pulling the `hseshadr`
+  copies until the `gainratio` copies are proven public; a follow-up PR repoints every pin.
 - The foundation guard now passes the consumer's `.github/actionlint.yaml` (or `.yml`) to
   actionlint with `-config-file`. The guard lints a snapshot without `.git`, so actionlint never
   found the config on its own and rejected declared self-hosted labels such as

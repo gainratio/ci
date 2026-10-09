@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
-MIRROR_ROOT: Final = "ghcr.io/hseshadr/mirror"
-PACKAGE_URL: Final = "https://github.com/users/hseshadr/packages/container/package/"
+MIRROR_OWNER: Final = "gainratio"
+MIRROR_ROOT: Final = f"ghcr.io/{MIRROR_OWNER}/mirror"
+PACKAGE_URL: Final = f"https://github.com/orgs/{MIRROR_OWNER}/packages/container/package/"
 DIGEST: Final = re.compile(r"sha256:[0-9a-f]{64}")
 SOURCE: Final = re.compile(r"(?P<repository>[a-z0-9.-]+\.[a-z]+/[a-z0-9._/-]+):(?P<tag>[\w.-]+)")
 FIELDS: Final = frozenset(("source", "digest", "mirror"))
@@ -75,7 +76,7 @@ class MirrorImage:
     @property
     def package_url(self) -> str:
         """GitHub package page that holds the visibility setting."""
-        name = self.mirror.removeprefix("ghcr.io/hseshadr/")
+        name = self.mirror.removeprefix(f"ghcr.io/{MIRROR_OWNER}/")
         return PACKAGE_URL + quote(name, safe="")
 
 
