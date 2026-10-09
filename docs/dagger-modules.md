@@ -394,6 +394,20 @@ upstream. Only the registry changes.
    base-image = "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.14-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
    ```
 
+3. TypeScript modules: set `"dagger": {"baseImage": "<mirror pin>"}` in the module's
+   `package.json` for the Node runtime image. The SDK's introspector and library generator
+   always run `oven/bun:1.3.0-alpine` and ignore `baseImage`
+   (`sdk/typescript/runtime/introspector.go`, v0.21.8), so also give the engine a Docker Hub
+   mirror. The CLI mounts `$XDG_CONFIG_HOME/dagger/engine.json` into the engine it starts
+   (`engine/client/drivers/container.go`), and the engine tries each mirror before Docker Hub.
+   `mirror.gcr.io` is Google's Docker Hub cache, the fallback for an image not yet mirrored.
+   Commit it as `.github/xdg/dagger/engine.json` and set
+   `XDG_CONFIG_HOME: ${{ github.workspace }}/.github/xdg` on every Dagger step:
+
+   ```json
+   {"registries": {"docker.io": {"mirrors": ["ghcr.io/hseshadr/mirror/docker.io", "mirror.gcr.io"]}}}
+   ```
+
 Point your own image constants at the mirror the same way. To add an image, add it to
 `mirror/images.json` in a PR here, merge it, and wait for the mirror job to go green. Then the
 consumer can use it. The Python SDK's `ghcr.io/astral-sh/uv` runtime image still comes from
