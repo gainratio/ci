@@ -165,7 +165,7 @@ from cloudflare_pages.main import (CurlPagesOperations, CurlRollbackOperations, 
   wrangler_deploy_args)
 from cloudflare_pages.models import AttemptIdentity, CreatedDeployment, GitHubEvidence, PagesTarget
 
-PYTHON_IMAGE = "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.14-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
+PYTHON_IMAGE = "ghcr.io/gainratio/mirror/docker.io/library/python:3.13.14-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6"
 SHA = "a" * 40
 MOCK_SERVER = __MOCK_SERVER__
 CA_CERT = __CA_CERT__

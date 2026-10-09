@@ -23,7 +23,7 @@ HASH_IMAGE_IDENTITY = (
     "alpine@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
 )
 HASH_IMAGE = (
-    "ghcr.io/hseshadr/mirror/docker.io/library/alpine:3.22.1"
+    "ghcr.io/gainratio/mirror/docker.io/library/alpine:3.22.1"
     "@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
 )
 INVENTORY_TRAILER = "portfolio-foundation-inventory-v1"

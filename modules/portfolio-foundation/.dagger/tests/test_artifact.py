@@ -203,7 +203,7 @@ def test_should_keep_toolchain_identity_when_the_hasher_is_pulled_from_a_mirror(
     # recorded toolchain, which verification compares exactly, does not change
     assert ("dagger-engine:v0.21.8", f"artifact-hasher:{upstream}") == TOOLCHAIN
     assert source_module.HASH_IMAGE.endswith(f"@{digest}")
-    assert source_module.HASH_IMAGE.startswith("ghcr.io/hseshadr/mirror/docker.io/library/alpine:")
+    assert source_module.HASH_IMAGE.startswith("ghcr.io/gainratio/mirror/docker.io/library/alpine:")
 
 
 def test_should_parse_exact_consumer_and_producing_identities_when_enveloping() -> None:

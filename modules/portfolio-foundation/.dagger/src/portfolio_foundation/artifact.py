@@ -28,7 +28,7 @@ from .source import (
 ENGINE_VERSION: Final = "v0.21.8"
 EPOCH: Final = 0
 EVIDENCE_IMAGE: Final = (
-    "ghcr.io/hseshadr/mirror/docker.io/library/python:3.13.15-alpine3.24"
+    "ghcr.io/gainratio/mirror/docker.io/library/python:3.13.15-alpine3.24"
     "@sha256:540c7d91f98ff6880174c40e99067bf5941eb54d818a7a5e094d188b196a934d"
 )
 IDENTITY_SEPARATOR_INDEX: Final = 40

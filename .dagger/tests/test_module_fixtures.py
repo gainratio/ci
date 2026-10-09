@@ -245,7 +245,7 @@ def _foundation_guard_source() -> str:
 
 
 def _gitleaks_image(source: str) -> str:
-    pattern = r"ghcr\.io/hseshadr/mirror/ghcr\.io/gitleaks/gitleaks:v8\.30\.1@sha256:[0-9a-f]+"
+    pattern = r"ghcr\.io/gainratio/mirror/ghcr\.io/gitleaks/gitleaks:v8\.30\.1@sha256:[0-9a-f]+"
     match = re.search(pattern, source.replace('"\n    "', ""))
     assert match is not None
     return match.group()
