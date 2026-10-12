@@ -1134,10 +1134,11 @@ def route_job(
 ) -> tuple[PolicyFinding, ...]:
     """Send reviewed native macOS lanes to their exception, everything else to thin ingress."""
     key = (scope.repository, scope.path, scope.job_id)
+    base = validate_base_job(scope.path, job.steps, engine)
     if key in NATIVE_MACOS_LANES and MACOS_RUNNER.fullmatch(job.runs_on or ""):
-        return validate_native_lane(document, scope.path, job)
+        return base + validate_native_lane(document, scope.path, job)
     if key in NATIVE_LANE_GATES:
-        return validate_native_gate(document, scope, job)
+        return base + validate_native_gate(document, scope, job)
     return validate_job_defaults(scope.path, job) + validate_job(
         scope.path, job, engine, scope.repository
     )
@@ -1161,10 +1162,30 @@ def validate_native_lane(
         for item in validate_checkout(path, step)
     )
     return (
-        validate_pinned_actions(path, job.steps)
-        + validate_native_actions(path, job.steps)
+        validate_native_actions(path, job.steps)
+        + validate_native_defaults(path, job)
         + checkouts
         + validate_native_boundary(document, path, job)
+    )
+
+
+def validate_native_defaults(path: str, job: WorkflowJob) -> tuple[PolicyFinding, ...]:
+    """Allow lane defaults to set only a literal, in-repository run working directory."""
+    if job.defaults is None or native_defaults_are_literal(job.defaults):
+        return ()
+    return (finding("native-lane-defaults", path, "only run.working-directory is allowed"),)
+
+
+def native_defaults_are_literal(defaults: dict[str, dict[str, Scalar]]) -> bool:
+    """Report whether defaults are exactly a literal relative working directory."""
+    run = defaults.get("run", {})
+    directory = scalar_text(run.get("working-directory"))
+    return all(
+        (
+            set(defaults) == {"run"} and set(run) == {"working-directory"},
+            bool(directory) and "${{" not in directory and not directory.startswith("/"),
+            not posixpath.normpath(directory).startswith(".."),
+        )
     )
 
 
@@ -1307,10 +1328,8 @@ def validate_job(
     path: str, job: WorkflowJob, engine_version: str | None = None, repository: str = ""
 ) -> tuple[PolicyFinding, ...]:
     """Dispatch a job to its only accepted execution shape."""
-    common = (
-        validate_steps(path, job.steps)
-        + validate_action_steps(path, job.steps, engine_version)
-        + validate_dagger_expressions(path, job.steps)
+    common = validate_base_job(path, job.steps, engine_version) + validate_shell_steps(
+        path, job.steps
     )
     names = tuple(map(action_name, job.steps))
     if UPLOAD_ACTION in names:
@@ -1318,6 +1337,17 @@ def validate_job(
     if DOWNLOAD_ACTION in names or scalar_text(job.permissions.get("id-token")) == "write":
         return common + validate_publisher(path, job, repository)
     return common + validate_ingress(path, job.steps, engine_version)
+
+
+def validate_base_job(
+    path: str, steps: tuple[WorkflowStep, ...], engine_version: str | None
+) -> tuple[PolicyFinding, ...]:
+    """The checks every job gets, thin ingress or reviewed exception alike."""
+    return (
+        validate_pinned_actions(path, steps)
+        + validate_action_steps(path, steps, engine_version)
+        + validate_dagger_expressions(path, steps)
+    )
 
 
 def validate_action_steps(
@@ -1332,14 +1362,13 @@ def validate_action_steps(
     )
 
 
-def validate_steps(path: str, steps: tuple[WorkflowStep, ...]) -> tuple[PolicyFinding, ...]:
-    """Reject mutable actions and shell execution in every shape."""
-    shells = tuple(
+def validate_shell_steps(path: str, steps: tuple[WorkflowStep, ...]) -> tuple[PolicyFinding, ...]:
+    """Reject shell execution: the thin-ingress shape rule native lanes are excepted from."""
+    return tuple(
         finding("shell-step", path, "run steps are forbidden")
         for step in steps
         if step.run is not None
     )
-    return validate_pinned_actions(path, steps) + shells
 
 
 def validate_pinned_actions(

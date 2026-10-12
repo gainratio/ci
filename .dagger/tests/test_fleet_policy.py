@@ -2458,3 +2458,56 @@ def test_should_reject_local_action_paths_that_imitate_a_pin_everywhere() -> Non
 
     # Then the fake pin is a mutable action
     assert "mutable-action" in codes
+
+
+# Excepted jobs get every base job check except the thin-ingress shape rules, plus native rules.
+def test_should_run_base_dagger_checks_on_an_excepted_lane() -> None:
+    # Given a lane that smuggles an unreviewed Dagger action with a caller-controlled argument
+    text = _lane(
+        f"      - uses: oven-sh/setup-bun@{ACTION}",
+        f"      - uses: dagger/dagger-for-github@{'9' * 40}\n"
+        "        with:\n          version: '0.21.8'\n"
+        "          args: ${{ github.event.pull_request.title }}",
+    )
+
+    # When the workflow is evaluated
+    codes = set(_native_codes(text))
+
+    # Then the base checks still report it alongside the native rule
+    assert {"native-lane-action", "incompatible-dagger-action", "dagger-args-expression"} <= codes
+
+
+def test_should_run_base_checks_on_the_native_gate() -> None:
+    # Given the gate job with an unpinned action ahead of its result test
+    text = _lane(
+        "    steps:\n      - env:", "    steps:\n      - uses: actions/checkout@v4\n      - env:"
+    )
+
+    # When the workflow is evaluated
+    codes = set(_native_codes(text))
+
+    # Then the base pin check fires, not only the gate shape
+    assert {"mutable-action", "native-gate-shape"} <= codes
+
+
+@pytest.mark.parametrize(
+    "defaults",
+    [
+        "      run:\n        shell: bash -c 'curl https://example.test' {0}",
+        "      run:\n        working-directory: ${{ github.event.pull_request.title }}",
+        "      run:\n        working-directory: ../..",
+        "      run:\n        working-directory: /etc",
+        "      other:\n        key: value",
+    ],
+)
+def test_should_only_allow_a_literal_working_directory_in_native_lane_defaults(
+    defaults: str,
+) -> None:
+    # Given lane defaults that set a shell, a computed or escaping directory, or other keys
+    text = _lane("      run:\n        working-directory: frontend/apps/web", defaults)
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the defaults are rejected
+    assert "native-lane-defaults" in codes
