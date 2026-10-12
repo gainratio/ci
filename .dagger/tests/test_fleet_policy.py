@@ -22,6 +22,7 @@ from ci.fleet_policy import (
     SourceFile,
     parse_typescript,
     validate_repository,
+    validate_workflow,
 )
 
 SHA = "a" * 40
@@ -2008,3 +2009,237 @@ def test_should_still_reject_look_alike_and_other_check_apps(app: CheckApp) -> N
 
     # Then it is still an independent check app
     assert [item.message for item in findings] == [f"{app.slug}#{app.app_id}"]
+
+
+# Native macOS lanes: almamesh's reviewed exception to thin Dagger ingress. Linux WebKit
+# cannot boot the engine's nested-Worker OPFS and macOS runners have no container runtime,
+# so these jobs run natively. The exception is keyed on (repo, path, job) AND a macOS runner;
+# pinned actions, read-only permissions, no credentials, and no pull_request_target still hold.
+NATIVE_PATH = ".github/workflows/webkit-macos.yml"
+NATIVE_CHECKOUT = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+NATIVE_LANE = f"""
+name: WebKit (macOS)
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  webkit-memory:
+    name: webkit / macOS memory
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: frontend/apps/web
+    steps:
+      - uses: actions/checkout@{NATIVE_CHECKOUT}
+        with:
+          persist-credentials: false
+          ref: ${{{{ github.sha }}}}
+      - uses: oven-sh/setup-bun@{ACTION}
+      - run: bun install --frozen-lockfile
+      - run: bash scripts/webkit-macos-lane.sh memory
+      - id: leak-scan
+        if: always()
+        run: node scripts/artifactLeakScan.mjs webkit-lane-evidence-memory
+      - uses: actions/upload-artifact@{UPLOAD}
+        if: always() && steps.leak-scan.outcome == 'success'
+        with:
+          name: webkit-lane-memory-evidence
+          path: frontend/apps/web/webkit-lane-evidence-memory
+          retention-days: 14
+          if-no-files-found: error
+  webkit-macos:
+    name: webkit / macOS time travel + export-import
+    needs: [webkit-memory]
+    if: ${{{{ !cancelled() }}}}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          MEMORY_RESULT: ${{{{ needs.webkit-memory.result }}}}
+        run: test "$MEMORY_RESULT" = success
+"""
+
+
+def _native_codes(text: str = NATIVE_LANE, *, repository: str = "almamesh") -> tuple[str, ...]:
+    source = SourceFile(path=NATIVE_PATH, text=text)
+    return tuple(item.code for item in validate_workflow(source, "v0.21.8", repository))
+
+
+def test_should_accept_reviewed_native_macos_lane_and_its_result_gate() -> None:
+    # Given almamesh's allowlisted macOS lane and the gate that only reads its result
+    # When the workflow is evaluated in almamesh's identity
+    codes = _native_codes()
+
+    # Then the reviewed exception holds with no findings
+    assert codes == ()
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        (
+            (
+                "      - run: bun install --frozen-lockfile",
+                "      - run: bun install --frozen-lockfile\n"
+                "        env:\n          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}",
+            ),
+            "native-lane-credential",
+        ),
+        (
+            (
+                "      - run: bun install --frozen-lockfile",
+                "      - run: echo ${{ github.token }} | gh auth login",
+            ),
+            "native-lane-credential",
+        ),
+        ((f"oven-sh/setup-bun@{ACTION}", "oven-sh/setup-bun@v2"), "mutable-action"),
+        (
+            ("permissions:\n  contents: read", "permissions:\n  contents: write"),
+            "native-lane-permissions",
+        ),
+        (
+            ("permissions:\n  contents: read", "permissions:\n  contents: read\n  packages: write"),
+            "native-lane-permissions",
+        ),
+        (("permissions:\n  contents: read\n", ""), "native-lane-permissions"),
+        (("  pull_request:\n", "  pull_request_target:\n"), "native-lane-trigger"),
+        (("          persist-credentials: false\n", ""), "checkout-credentials"),
+        (
+            ("    timeout-minutes: 45\n", "    timeout-minutes: 45\n    environment: production\n"),
+            "native-lane-environment",
+        ),
+    ],
+)
+def test_should_still_enforce_safety_properties_on_allowlisted_macos_lanes(
+    change: tuple[str, str], code: str
+) -> None:
+    # Given an allowlisted macOS lane that breaks one safety property
+    old, new = change
+    text = NATIVE_LANE.replace(old, new, 1)
+    assert text != NATIVE_LANE
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the exception does not excuse it
+    assert code in codes
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    ["on: pull_request_target", "on: [push, pull_request_target]", "on: null"],
+)
+def test_should_reject_privileged_or_unreadable_triggers_in_any_on_form(trigger: str) -> None:
+    # Given the native lane workflow triggered in string, list, or unreadable form
+    on_block = "on:\n  push:\n    branches: [main]\n  pull_request:\n"
+    text = NATIVE_LANE.replace(on_block, trigger + "\n", 1)
+    assert text != NATIVE_LANE
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the lane may not run with a base-repository token on fork code
+    assert "native-lane-trigger" in codes
+
+
+def test_should_accept_native_lane_with_plain_string_and_list_triggers() -> None:
+    # Given unprivileged triggers in the other `on` forms
+    on_block = "on:\n  push:\n    branches: [main]\n  pull_request:\n"
+    codes = {
+        trigger: _native_codes(NATIVE_LANE.replace(on_block, trigger + "\n", 1))
+        for trigger in ("on: pull_request", "on: [push, pull_request]")
+    }
+
+    # Then neither is reported
+    assert codes == {"on: pull_request": (), "on: [push, pull_request]": ()}
+
+
+def test_should_not_except_an_allowlisted_lane_that_runs_on_linux() -> None:
+    # Given the allowlisted lane moved onto an ubuntu runner
+    text = NATIVE_LANE.replace("runs-on: macos-15", "runs-on: ubuntu-24.04", 1)
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then it is held to thin Dagger ingress again
+    assert {"job-defaults", "shell-step", "candidate-order"} <= set(codes)
+
+
+@pytest.mark.parametrize(
+    ("job", "repository"),
+    [("webkit-memory", "agentic-saga"), ("webkit-other", "almamesh")],
+)
+def test_should_not_except_a_macos_job_outside_the_allowlist(job: str, repository: str) -> None:
+    # Given a macOS job whose (repo, path, job) key was never reviewed
+    text = (
+        NATIVE_LANE.replace("  webkit-memory:\n", f"  {job}:\n", 1)
+        .replace("needs: [webkit-memory]", f"needs: [{job}]")
+        .replace("needs.webkit-memory.result", f"needs.{job}.result")
+    )
+
+    # When the workflow is evaluated
+    codes = _native_codes(text, repository=repository)
+
+    # Then it is held to thin Dagger ingress
+    assert {"job-defaults", "shell-step", "candidate-order"} <= set(codes)
+
+
+def test_should_not_except_the_native_lane_workflow_at_another_path() -> None:
+    # Given the reviewed workflow text at an unreviewed path
+    source = SourceFile(path=".github/workflows/other.yml", text=NATIVE_LANE)
+
+    # When the workflow is evaluated
+    codes = {item.code for item in validate_workflow(source, "v0.21.8", "almamesh")}
+
+    # Then nothing in it is excepted
+    assert {"job-defaults", "shell-step", "candidate-order"} <= codes
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('run: test "$MEMORY_RESULT" = success', "run: curl https://example.test"),
+        (
+            'run: test "$MEMORY_RESULT" = success',
+            'run: test "$MEMORY_RESULT" = success && test "$OTHER" = success',
+        ),
+        ("${{ needs.webkit-memory.result }}", "${{ secrets.TOKEN }}"),
+        ("${{ needs.webkit-memory.result }}", "${{ github.event.pull_request.title }}"),
+        (
+            "    steps:\n      - env:",
+            f"    steps:\n      - uses: actions/checkout@{NATIVE_CHECKOUT}\n      - env:",
+        ),
+        ("needs: [webkit-memory]", "needs: [build]"),
+        ("    needs: [webkit-memory]\n", ""),
+    ],
+)
+def test_should_reject_a_native_gate_that_does_more_than_read_lane_results(
+    old: str, new: str
+) -> None:
+    # Given the allowlisted gate job altered to do anything but test lane results
+    text = NATIVE_LANE.replace(old, new, 1)
+    assert text != NATIVE_LANE
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the gate is rejected
+    assert "native-gate-shape" in codes
+
+
+def test_should_reject_job_defaults_on_ordinary_ingress() -> None:
+    # Given an ordinary Linux ingress that sets job defaults
+    workflow = INGRESS.replace(
+        "    runs-on:", "    defaults:\n      run:\n        shell: bash\n    runs-on:", 1
+    )
+    assert workflow != INGRESS
+
+    # When the repository is evaluated
+    codes = _codes(_snapshot(workflow))
+
+    # Then defaults stay outside the thin-ingress vocabulary
+    assert "job-defaults" in codes
