@@ -51,6 +51,11 @@
       "mirror": "ghcr.io/gainratio/mirror/docker.io/oven/bun"
     },
     {
+      "source": "docker.io/oven/bun:1.4.3",
+      "digest": "sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598",
+      "mirror": "ghcr.io/gainratio/mirror/docker.io/oven/bun"
+    },
+    {
       "source": "docker.io/curlimages/curl:8.16.0",
       "digest": "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6",
       "mirror": "ghcr.io/gainratio/mirror/docker.io/curlimages/curl"

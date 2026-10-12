@@ -238,6 +238,21 @@ def test_should_load_the_committed_manifest_with_unique_digest_pins() -> None:
     assert len({image.pin for image in images}) == len(images)
 
 
+def test_should_mirror_the_bun_images_consumer_gates_pin() -> None:
+    # Given the committed manifest
+    images = load_manifest(MANIFEST.read_text())
+
+    # Then every Bun release a consumer gate pulls (almamesh: 1.3.5, then 1.4.3) has a
+    # mirror pin at its upstream linux/amd64+arm64 index digest
+    pins = {image.pin for image in images}
+    assert {
+        "ghcr.io/gainratio/mirror/docker.io/oven/bun:1.3.5"
+        "@sha256:e90cdbaf9ccdb3d4bd693aa335c3310a6004286a880f62f79b18f9b1312a8ec3",
+        "ghcr.io/gainratio/mirror/docker.io/oven/bun:1.4.3"
+        "@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598",
+    } <= pins
+
+
 def test_should_mirror_every_image_pinned_by_central_and_shared_module_code() -> None:
     # Given every digest-pinned image ref in central, shared-module, and fixture source
     pinned = _pinned_refs()
