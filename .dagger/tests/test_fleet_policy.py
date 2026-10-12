@@ -2191,6 +2191,76 @@ def test_should_not_except_a_macos_job_outside_the_allowlist(job: str, repositor
     assert {"job-defaults", "shell-step", "candidate-order"} <= set(codes)
 
 
+# almamesh's real-Safari smoke: its own workflow, so a red smoke never fails the WebKit (macOS)
+# run that deploy acceptance reads. Advisory, so it has no result gate.
+SAFARI_PATH = ".github/workflows/safari-smoke.yml"
+SAFARI_LANE = f"""
+name: Safari (macOS)
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  safari-smoke:
+    name: safari / macOS smoke
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend/apps/web
+    steps:
+      - uses: actions/checkout@{NATIVE_CHECKOUT}
+        with:
+          persist-credentials: false
+          ref: ${{{{ github.sha }}}}
+      - uses: oven-sh/setup-bun@{ACTION}
+      - run: bun install --frozen-lockfile
+      - run: sudo safaridriver --enable
+      - run: bash scripts/safari-smoke.sh
+      - id: leak-scan
+        if: always()
+        run: node scripts/artifactLeakScan.mjs safari-smoke-evidence
+      - uses: actions/upload-artifact@{UPLOAD}
+        if: always() && steps.leak-scan.outcome == 'success'
+        with:
+          name: safari-smoke-evidence
+          path: frontend/apps/web/safari-smoke-evidence
+          retention-days: 14
+          if-no-files-found: error
+"""
+
+
+def _safari_codes(path: str = SAFARI_PATH, *, repository: str = "almamesh") -> set[str]:
+    source = SourceFile(path=path, text=SAFARI_LANE)
+    return {item.code for item in validate_workflow(source, "v0.21.8", repository)}
+
+
+def test_should_accept_almamesh_safari_smoke_as_a_reviewed_native_lane() -> None:
+    # Given almamesh's advisory real-Safari smoke in its own workflow
+    # When the workflow is evaluated in almamesh's identity
+    codes = _safari_codes()
+
+    # Then the reviewed exception holds with no findings
+    assert codes == set()
+
+
+@pytest.mark.parametrize(
+    ("path", "repository"),
+    [(NATIVE_PATH, "almamesh"), (SAFARI_PATH, "agentic-saga")],
+)
+def test_should_not_except_safari_smoke_at_another_path_or_repository(
+    path: str, repository: str
+) -> None:
+    # Given the safari-smoke job keyed by a path or repository that was never reviewed
+    # When the workflow is evaluated
+    codes = _safari_codes(path, repository=repository)
+
+    # Then it is held to thin Dagger ingress
+    assert {"job-defaults", "shell-step"} <= codes
+
+
 def test_should_not_except_the_native_lane_workflow_at_another_path() -> None:
     # Given the reviewed workflow text at an unreviewed path
     source = SourceFile(path=".github/workflows/other.yml", text=NATIVE_LANE)
