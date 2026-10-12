@@ -2216,9 +2216,11 @@ jobs:
           persist-credentials: false
           ref: ${{{{ github.sha }}}}
       - uses: oven-sh/setup-bun@{ACTION}
+      - uses: astral-sh/setup-uv@{ACTION}
       - run: bun install --frozen-lockfile
       - run: sudo safaridriver --enable
-      - run: bash scripts/safari-smoke.sh
+      - run: bash scripts/setup-dev-assets.sh
+      - run: node scripts/safari-smoke.mjs
       - id: leak-scan
         if: always()
         run: node scripts/artifactLeakScan.mjs safari-smoke-evidence
