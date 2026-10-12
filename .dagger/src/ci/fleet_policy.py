@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import chain
 from types import MappingProxyType
-from typing import Final, TypeIs
+from typing import Final, Literal, TypeIs
 
 import tree_sitter_typescript as ts_typescript
 import yaml
@@ -24,7 +24,7 @@ from tree_sitter import Language, Node, Parser
 # move. A literal allow-list, never a pattern: a lookalike owner must still be refused.
 ALLOWED_OWNERS: Final = ("hseshadr", "gainratio")
 CENTRAL_OWNER: Final = "(?:" + "|".join(re.escape(owner) for owner in ALLOWED_OWNERS) + ")"
-PINNED_ACTION: Final = re.compile(r"^[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
+PINNED_ACTION: Final = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
 REMOTE_MODULE_SHAPE: Final = re.compile(
     r"^github\.com/(?P<owner>[^/]+)/(?P<repo>[^/@]+)"
     r"(?:/(?P<subpath>[^@]*))?@(?P<sha>[0-9a-f]{40})$"
@@ -94,6 +94,39 @@ TYPESCRIPT_IDENTIFIER: Final = re.compile(r"[A-Za-z_$][\w$]*")
 TYPESCRIPT_INERT_NODES: Final = frozenset(("comment", "regex", "string"))
 TYPESCRIPT_LANGUAGE: Final = Language(ts_typescript.language_typescript())
 ALIAS_FLOW_PASSES: Final = 4
+# Reviewed exception to thin Dagger ingress: native macOS lanes. Linux WebKit cannot boot the
+# engine's nested-Worker OPFS and macOS runners have no container runtime, so these jobs run
+# natively. Keyed on exact (repository, workflow path, job id) AND a macOS runner; mirrors
+# almamesh's NATIVE_MACOS_LANES contract (tests/dagger-ingress-contract.test.ts). Pinned actions,
+# read-only permissions, no credentials, and no pull_request_target still hold.
+NATIVE_LANE_WORKFLOW: Final = ".github/workflows/webkit-macos.yml"
+NATIVE_MACOS_LANES: Final = frozenset(
+    ("almamesh", NATIVE_LANE_WORKFLOW, job)
+    for job in ("webkit-memory", "webkit-travel", "webkit-portable")
+)
+# The one stable acceptance job that only tests the lanes' results (deploy gates on its name).
+NATIVE_LANE_GATES: Final = frozenset((("almamesh", NATIVE_LANE_WORKFLOW, "webkit-macos"),))
+# Literal GitHub-hosted macOS labels only: never an expression, a list, or a self-hosted label.
+MACOS_RUNNER: Final = re.compile(
+    r"macos-(?:latest|1[3-9]|2[0-9])(?:-(?:large|xlarge|intel|arm64))?"
+)
+# Events whose runs use the PR head's own read-only token; nothing that runs base-repo context.
+NATIVE_TRIGGERS: Final = frozenset(("push", "pull_request", "workflow_dispatch", "merge_group"))
+# The only actions a native lane may use (almamesh MACOS_LANE_ACTIONS), each still SHA-pinned.
+NATIVE_LANE_ACTIONS: Final = frozenset(
+    (CHECKOUT, "oven-sh/setup-bun", "astral-sh/setup-uv", UPLOAD_ACTION)
+)
+CANDIDATE_PATHS: Final = frozenset(("candidate", "release"))
+READ_ONLY_SCOPES: Final = frozenset(("read", "none"))
+# Any mention of the secrets context, the job token, or the whole github context (toJSON(github)).
+NATIVE_CREDENTIAL: Final = re.compile(
+    r"\bsecrets\b|\bgithub_token\b"
+    r"|\bgithub\s*(?:[,)]|\.\s*token\b|\[\s*\\?['\"]token\\?['\"]\s*\])",
+    re.IGNORECASE,
+)
+GATE_RUN: Final = re.compile(r'test "\$[A-Z_]+" = success(?: && test "\$[A-Z_]+" = success)*')
+GATE_VARIABLE: Final = re.compile(r"\$([A-Z_]+)")
+NEEDS_RESULT: Final = re.compile(r"\$\{\{ needs\.([\w-]+)\.result \}\}")
 
 
 def central_prefixes(subpath: str) -> tuple[str, ...]:
@@ -426,6 +459,7 @@ class WorkflowJob:
     needs: str | list[str] | None = None
     outputs: dict[str, Scalar] = Field(default_factory=dict)
     concurrency: object | None = None
+    defaults: dict[str, dict[str, Scalar]] | None = None
 
 
 @validated_dataclass(config=BOUNDARY_CONFIG)
@@ -459,10 +493,42 @@ def scalar_text(value: Scalar | None) -> str:
 def parse_workflow(source: SourceFile) -> WorkflowDocument | PolicyFinding:
     """Parse and validate one complete workflow document."""
     try:
-        document = normalize_on_key(yaml.safe_load(source.text))
+        document = normalize_on_key(load_unique_yaml(source.text))
         return TypeAdapter(WorkflowDocument).validate_python(document)
     except (yaml.YAMLError, ValidationError) as error:
         return finding("workflow-schema", source.path, str(error))
+
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """A SafeLoader that refuses duplicate mapping keys, as GitHub's workflow parser does.
+
+    PyYAML silently keeps the last duplicate; refusing removes that parser differential.
+    """
+
+
+def construct_unique_mapping(
+    loader: UniqueKeyLoader, node: yaml.MappingNode
+) -> dict[object, object]:
+    """Construct one mapping, refusing any key written twice."""
+    loader.flatten_mapping(node)
+    keys = tuple(repr(loader.construct_object(key)) for key, _ in node.value)
+    if len(set(keys)) != len(keys):
+        raise yaml.constructor.ConstructorError(None, None, "duplicate key", node.start_mark)
+    return loader.construct_mapping(node)
+
+
+UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_unique_mapping
+)
+
+
+def load_unique_yaml(text: str) -> object:
+    """Safely load one YAML document whose mappings have unique keys."""
+    loader = UniqueKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
 
 
 def normalize_on_key(document: object) -> object:
@@ -1047,29 +1113,253 @@ def validate_workflow(
     if isinstance(parsed, PolicyFinding):
         return (parsed,)
     engine = engine_version or ENGINE_VERSION
-    findings = [
+    return tuple(
         item
-        for job in parsed.jobs.values()
-        for item in validate_job(source.path, job, engine, repository)
-    ]
-    return tuple(findings)
+        for job_id, job in parsed.jobs.items()
+        for item in validate_job(parsed, JobScope(repository, source.path, job_id), job, engine)
+    )
+
+
+@dataclass(frozen=True)
+class JobScope:
+    """The exact (repository, workflow path, job id) identity an exception is keyed on."""
+
+    repository: str
+    path: str
+    job_id: str
 
 
 def validate_job(
-    path: str, job: WorkflowJob, engine_version: str | None = None, repository: str = ""
+    document: WorkflowDocument, scope: JobScope, job: WorkflowJob, engine: str
 ) -> tuple[PolicyFinding, ...]:
-    """Dispatch a job to its only accepted execution shape."""
-    common = (
-        validate_steps(path, job.steps)
-        + validate_action_steps(path, job.steps, engine_version)
-        + validate_dagger_expressions(path, job.steps)
+    """The only per-job entry point: base checks, then the one native-lane decision.
+
+    Every job gets the base checks. A reviewed native lane or gate adds its safety rules in
+    place of the thin-ingress shape rules; every other job gets defaults and shape rules.
+    """
+    base = validate_base_job(scope.path, job.steps, engine)
+    kind = native_exception(scope, job)
+    if kind == "lane":
+        return base + validate_native_lane(document, scope.path, job)
+    if kind == "gate":
+        return base + validate_native_gate(document, scope, job)
+    return (
+        base
+        + validate_job_defaults(scope.path, job)
+        + validate_ingress_shape(scope.path, job, engine, scope.repository)
     )
+
+
+def native_exception(scope: JobScope, job: WorkflowJob) -> Literal["lane", "gate"] | None:
+    """Decide once whether a job is a reviewed native lane, its gate, or neither."""
+    key = (scope.repository, scope.path, scope.job_id)
+    if key in NATIVE_MACOS_LANES and MACOS_RUNNER.fullmatch(job.runs_on or ""):
+        return "lane"
+    return "gate" if key in NATIVE_LANE_GATES else None
+
+
+def validate_job_defaults(path: str, job: WorkflowJob) -> tuple[PolicyFinding, ...]:
+    """Keep job defaults outside the thin-ingress vocabulary."""
+    if job.defaults is None:
+        return ()
+    return (finding("job-defaults", path, "job defaults are allowed only on native lanes"),)
+
+
+def validate_native_lane(
+    document: WorkflowDocument, path: str, job: WorkflowJob
+) -> tuple[PolicyFinding, ...]:
+    """Run natively, but pinned, read-only, credential-free, and checkout without credentials."""
+    checkouts = tuple(
+        item
+        for step in job.steps
+        if action_name(step) == CHECKOUT
+        for item in validate_checkout(path, step)
+    )
+    return (
+        validate_native_actions(path, job.steps)
+        + validate_native_defaults(path, job)
+        + checkouts
+        + validate_native_boundary(document, path, job)
+    )
+
+
+def validate_native_defaults(path: str, job: WorkflowJob) -> tuple[PolicyFinding, ...]:
+    """Allow lane defaults to set only a literal, in-repository run working directory."""
+    if job.defaults is None or native_defaults_are_literal(job.defaults):
+        return ()
+    return (finding("native-lane-defaults", path, "only run.working-directory is allowed"),)
+
+
+def native_defaults_are_literal(defaults: dict[str, dict[str, Scalar]]) -> bool:
+    """Report whether defaults are exactly a literal relative working directory."""
+    run = defaults.get("run", {})
+    directory = scalar_text(run.get("working-directory"))
+    return all(
+        (
+            set(defaults) == {"run"} and set(run) == {"working-directory"},
+            bool(directory) and "${{" not in directory and not directory.startswith("/"),
+            not posixpath.normpath(directory).startswith(".."),
+        )
+    )
+
+
+def validate_native_actions(
+    path: str, steps: tuple[WorkflowStep, ...]
+) -> tuple[PolicyFinding, ...]:
+    """Allow only the reviewed lane actions, and uploads only of literal evidence."""
+    actions = tuple(
+        finding("native-lane-action", path, step.uses)
+        for step in steps
+        if step.uses and action_name(step) not in NATIVE_LANE_ACTIONS
+    )
+    return actions + validate_native_uploads(path, steps)
+
+
+def validate_native_uploads(
+    path: str, steps: tuple[WorkflowStep, ...]
+) -> tuple[PolicyFinding, ...]:
+    """Reject any lane upload that is not literal, non-candidate evidence."""
+    return tuple(
+        finding("native-lane-artifact", path, "upload must be literal, non-candidate evidence")
+        for step in steps
+        if action_name(step) == UPLOAD_ACTION and not native_upload_is_evidence(step)
+    )
+
+
+def native_upload_is_evidence(step: WorkflowStep) -> bool:
+    """Require a literal name and path that cannot pose as a Dagger-proven candidate."""
+    name = scalar_text(step.with_.get("name"))
+    upload_path = scalar_text(step.with_.get("path")).rstrip("/")
+    return all(
+        (
+            bool(name) and "${{" not in name,
+            bool(upload_path) and "${{" not in upload_path,
+            posixpath.basename(upload_path) not in CANDIDATE_PATHS,
+        )
+    )
+
+
+def validate_native_boundary(
+    document: WorkflowDocument, path: str, job: WorkflowJob
+) -> tuple[PolicyFinding, ...]:
+    """The safety properties every native-lane exception must still satisfy."""
+    checks = (
+        (native_permissions_are_read_only(document, job), "native-lane-permissions"),
+        (not NATIVE_CREDENTIAL.search(job_source_text(job)), "native-lane-credential"),
+        (triggers_are_unprivileged(document), "native-lane-trigger"),
+        (job.environment is None, "native-lane-environment"),
+    )
+    return tuple(finding(code, path, "native lane boundary") for ok, code in checks if not ok)
+
+
+def native_permissions_are_read_only(document: WorkflowDocument, job: WorkflowJob) -> bool:
+    """Require explicit contents: read and no scope above read."""
+    permissions = job.permissions or document.permissions
+    return scalar_text(permissions.get("contents")) == "read" and all(
+        scalar_text(value) in READ_ONLY_SCOPES for value in permissions.values()
+    )
+
+
+def job_source_text(job: WorkflowJob) -> str:
+    """Return every value of one job as text, for credential reference scanning."""
+    return TypeAdapter(WorkflowJob).dump_json(job).decode()
+
+
+def workflow_triggers(document: WorkflowDocument) -> frozenset[str] | None:
+    """Return every trigger of a string, list, or mapping `on`; None for any other shape."""
+    triggers = document.on_
+    if isinstance(triggers, str):
+        return frozenset((triggers,))
+    if isinstance(triggers, (list, dict)):
+        return frozenset(str(item) for item in triggers)
+    return None
+
+
+def triggers_are_unprivileged(document: WorkflowDocument) -> bool:
+    """Allow only reviewed PR-scoped events; fail closed on an `on` shape that cannot be read."""
+    triggers = workflow_triggers(document)
+    return triggers is not None and triggers <= NATIVE_TRIGGERS
+
+
+def validate_native_gate(
+    document: WorkflowDocument, scope: JobScope, job: WorkflowJob
+) -> tuple[PolicyFinding, ...]:
+    """Allow the acceptance job only to test the results of allowlisted lanes."""
+    shape = (
+        ()
+        if native_gate_is_exact(scope, job)
+        else (finding("native-gate-shape", scope.path, "gate may only test native lane results"),)
+    )
+    return validate_native_boundary(document, scope.path, job) + shape
+
+
+def native_gate_is_exact(scope: JobScope, job: WorkflowJob) -> bool:
+    """Require needs on reviewed lanes only and one step that tests exactly their results."""
+    needs = needed_jobs(job)
+    lanes = frozenset((scope.repository, scope.path, need) for need in needs)
+    single = job.steps[0] if len(job.steps) == 1 else None
+    return all(
+        (
+            bool(needs),
+            lanes <= NATIVE_MACOS_LANES,
+            single is not None and gate_step_is_exact(single, needs),
+        )
+    )
+
+
+def needed_jobs(job: WorkflowJob) -> frozenset[str]:
+    """Return the job ids a job declares in `needs`, in either string or list form."""
+    return frozenset((job.needs,) if isinstance(job.needs, str) else (job.needs or ()))
+
+
+def gate_step_is_exact(step: WorkflowStep, needs: frozenset[str]) -> bool:
+    """Accept only `test "$X" = success` clauses over env bound to needed lanes' results."""
+    run = step.run or ""
+    return all(
+        (
+            step_is_bare_run(step),
+            GATE_RUN.fullmatch(run) is not None,
+            frozenset(GATE_VARIABLE.findall(run)) == frozenset(step.env),
+            gate_results(step) == needs,
+        )
+    )
+
+
+def step_is_bare_run(step: WorkflowStep) -> bool:
+    """Report whether a step is a plain run with no action, inputs, shell, or directory."""
+    return all((step.uses is None, not step.with_, step.shell is None, not step.working_directory))
+
+
+def gate_results(step: WorkflowStep) -> frozenset[str] | None:
+    """Return the lane ids whose results a step's env binds, or None if any env is not one."""
+    matches = tuple(NEEDS_RESULT.fullmatch(scalar_text(value)) for value in step.env.values())
+    if not all(matches):
+        return None
+    return frozenset(item.group(1) for item in matches if item)
+
+
+def validate_ingress_shape(
+    path: str, job: WorkflowJob, engine_version: str | None, repository: str
+) -> tuple[PolicyFinding, ...]:
+    """Dispatch a non-excepted job to its only accepted thin-ingress shape."""
+    common = validate_shell_steps(path, job.steps)
     names = tuple(map(action_name, job.steps))
     if UPLOAD_ACTION in names:
         return common + validate_candidate(path, job.steps)
     if DOWNLOAD_ACTION in names or scalar_text(job.permissions.get("id-token")) == "write":
         return common + validate_publisher(path, job, repository)
     return common + validate_ingress(path, job.steps, engine_version)
+
+
+def validate_base_job(
+    path: str, steps: tuple[WorkflowStep, ...], engine_version: str | None
+) -> tuple[PolicyFinding, ...]:
+    """The checks every job gets, thin ingress or reviewed exception alike."""
+    return (
+        validate_pinned_actions(path, steps)
+        + validate_action_steps(path, steps, engine_version)
+        + validate_dagger_expressions(path, steps)
+    )
 
 
 def validate_action_steps(
@@ -1084,15 +1374,24 @@ def validate_action_steps(
     )
 
 
-def validate_steps(path: str, steps: tuple[WorkflowStep, ...]) -> tuple[PolicyFinding, ...]:
-    """Reject mutable actions and shell execution in every shape."""
-    findings: list[PolicyFinding] = []
-    for step in steps:
-        if step.uses and not PINNED_ACTION.fullmatch(step.uses):
-            findings.append(finding("mutable-action", path, step.uses))
-        if step.run is not None:
-            findings.append(finding("shell-step", path, "run steps are forbidden"))
-    return tuple(findings)
+def validate_shell_steps(path: str, steps: tuple[WorkflowStep, ...]) -> tuple[PolicyFinding, ...]:
+    """Reject shell execution: the thin-ingress shape rule native lanes are excepted from."""
+    return tuple(
+        finding("shell-step", path, "run steps are forbidden")
+        for step in steps
+        if step.run is not None
+    )
+
+
+def validate_pinned_actions(
+    path: str, steps: tuple[WorkflowStep, ...]
+) -> tuple[PolicyFinding, ...]:
+    """Reject any action not pinned to a full commit SHA."""
+    return tuple(
+        finding("mutable-action", path, step.uses)
+        for step in steps
+        if step.uses and not PINNED_ACTION.fullmatch(step.uses)
+    )
 
 
 def validate_dagger_expressions(
