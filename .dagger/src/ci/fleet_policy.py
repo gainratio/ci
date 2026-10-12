@@ -101,8 +101,15 @@ ALIAS_FLOW_PASSES: Final = 4
 # read-only permissions, no credentials, and no pull_request_target still hold.
 NATIVE_LANE_WORKFLOW: Final = ".github/workflows/webkit-macos.yml"
 NATIVE_MACOS_LANES: Final = frozenset(
-    ("almamesh", NATIVE_LANE_WORKFLOW, job)
-    for job in ("webkit-memory", "webkit-travel", "webkit-portable")
+    (
+        *(
+            ("almamesh", NATIVE_LANE_WORKFLOW, job)
+            for job in ("webkit-memory", "webkit-travel", "webkit-portable")
+        ),
+        # Advisory real-Safari smoke (safaridriver). Its own workflow, so a red smoke never
+        # fails the WebKit (macOS) run that deploy acceptance reads; it has no result gate.
+        ("almamesh", ".github/workflows/safari-smoke.yml", "safari-smoke"),
+    )
 )
 # The one stable acceptance job that only tests the lanes' results (deploy gates on its name).
 NATIVE_LANE_GATES: Final = frozenset((("almamesh", NATIVE_LANE_WORKFLOW, "webkit-macos"),))
