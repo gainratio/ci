@@ -2243,3 +2243,218 @@ def test_should_reject_job_defaults_on_ordinary_ingress() -> None:
 
     # Then defaults stay outside the thin-ingress vocabulary
     assert "job-defaults" in codes
+
+
+# Adversarial review of the native-lane exception: every escape below must stay red.
+def _lane(old: str, new: str) -> str:
+    text = NATIVE_LANE.replace(old, new, 1)
+    assert text != NATIVE_LANE
+    return text
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "macos-custom-pool",
+        "macos-15-self-hosted",
+        "${{ matrix.os }}",
+        "macos-${{ matrix.version }}",
+        "[self-hosted, macos-15]",
+        "{group: macos-15}",
+    ],
+)
+def test_should_not_except_a_lane_whose_runner_is_not_a_literal_hosted_macos_label(
+    runner: str,
+) -> None:
+    # Given an allowlisted lane on a self-hosted, expression, list, or group runner
+    text = _lane("runs-on: macos-15", f"runs-on: {runner}")
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the lane is not excepted (schema or thin-ingress findings)
+    assert {"workflow-schema", "shell-step"} & set(codes)
+
+
+@pytest.mark.parametrize(
+    "runner", ["macos-15", "macos-latest", "macos-14-large", "macos-15-xlarge"]
+)
+def test_should_except_github_hosted_macos_labels(runner: str) -> None:
+    # Given an allowlisted lane on a GitHub-hosted macOS label
+    # When the workflow is evaluated
+    codes = _native_codes(NATIVE_LANE.replace("runs-on: macos-15", f"runs-on: {runner}", 1))
+
+    # Then the exception holds
+    assert codes == ()
+
+
+def test_should_not_except_a_dot_slash_or_differently_cased_workflow_path() -> None:
+    # Given the reviewed workflow text at non-canonical spellings of the reviewed path
+    paths = ("./.github/workflows/webkit-macos.yml", ".github/workflows/WebKit-macOS.yml")
+
+    # When each is evaluated in almamesh's identity
+    codes = [
+        {
+            item.code
+            for item in validate_workflow(SourceFile(path=p, text=NATIVE_LANE), None, "almamesh")
+        }
+        for p in paths
+    ]
+
+    # Then neither spelling is excepted
+    assert all("shell-step" in item for item in codes)
+
+
+def test_should_reject_duplicate_yaml_keys_that_parsers_resolve_differently() -> None:
+    # Given a lane whose permissions key is written twice (write first, read last)
+    text = _lane(
+        "    timeout-minutes: 45\n",
+        "    timeout-minutes: 45\n    permissions:\n"
+        "      contents: write\n    permissions:\n      contents: read\n",
+    )
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the ambiguous document is rejected outright
+    assert codes == ("workflow-schema",)
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "echo '${{ toJSON(secrets) }}'",
+        "echo ${{ SECRETS.NPM }}",
+        "echo ${{ secrets['NPM'] }}",
+        "echo '${{ toJSON(github) }}'",
+        "echo ${{ github['token'] }}",
+        "echo ${{ github . token }}",
+        "echo $GITHUB_TOKEN | gh auth login --with-token",
+    ],
+)
+def test_should_reject_every_credential_reference_form_in_a_native_lane(run: str) -> None:
+    # Given a lane step that reaches a secret or the job token in any spelling
+    text = _lane("      - run: bun install --frozen-lockfile", f"      - run: {run}")
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then it is a credential finding
+    assert "native-lane-credential" in codes
+
+
+def test_should_scan_yaml_aliases_for_credentials() -> None:
+    # Given a secret defined once behind an anchor and pulled into the lane by alias
+    text = _lane(
+        "      - run: bun install --frozen-lockfile",
+        "      - run: bun install --frozen-lockfile\n        env: &creds\n"
+        "          T: ${{ secrets.T }}\n      - run: echo ok\n        env: *creds",
+    )
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the resolved alias is scanned too
+    assert "native-lane-credential" in codes
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    ["workflow_run", "issue_comment", "pull_request_review", "repository_dispatch"],
+)
+def test_should_reject_native_lane_triggers_outside_the_reviewed_set(trigger: str) -> None:
+    # Given the lane workflow also triggered by a privileged or foreign event
+    text = _lane("  pull_request:\n", f"  pull_request:\n  {trigger}:\n")
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the trigger is rejected
+    assert "native-lane-trigger" in codes
+
+
+@pytest.mark.parametrize(
+    "permissions",
+    [
+        "permissions:\n  contents: read\n  id-token: write",
+        "permissions:\n  contents: read\n  actions: write",
+        "permissions: write-all",
+        "permissions: read-all",
+    ],
+)
+def test_should_reject_any_scope_above_read_or_a_shorthand_grant(permissions: str) -> None:
+    # Given the lane workflow granted OIDC, write, or a blanket shorthand
+    text = _lane("permissions:\n  contents: read", permissions)
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then it is rejected (shorthand fails the schema)
+    assert {"native-lane-permissions", "workflow-schema"} & set(codes)
+
+
+@pytest.mark.parametrize(
+    "uses",
+    [
+        f"./.github/actions/setup@{'b' * 40}",
+        "./.github/actions/setup",
+        "docker://alpine@sha256:" + "c" * 64,
+        f"actions/download-artifact@{DOWNLOAD}",
+        f"dagger/dagger-for-github@{DAGGER}",
+        f"attacker/setup-bun@{ACTION}",
+        f"oven-sh/setup-bun/../../attacker/x@{ACTION}",
+    ],
+)
+def test_should_only_allow_the_reviewed_lane_actions(uses: str) -> None:
+    # Given a lane that runs a local, docker, artifact-consuming, or unreviewed action
+    text = _lane(f"oven-sh/setup-bun@{ACTION}", uses)
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the action is rejected
+    assert "native-lane-action" in codes
+
+
+def test_should_reject_a_reusable_workflow_call_in_place_of_a_lane() -> None:
+    # Given an allowlisted job id that calls a reusable workflow
+    text = _lane(
+        "    runs-on: macos-15\n",
+        f"    uses: attacker/repo/.github/workflows/x.yml@{ACTION}\n    secrets: inherit\n"
+        "    runs-on: macos-15\n",
+    )
+
+    # When the workflow is evaluated
+    codes = _native_codes(text)
+
+    # Then the document is outside the job vocabulary
+    assert codes == ("workflow-schema",)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("name: webkit-lane-memory-evidence", "name: example-${{ github.sha }}"),
+        ("path: frontend/apps/web/webkit-lane-evidence-memory", "path: ${{ github.workspace }}"),
+        ("path: frontend/apps/web/webkit-lane-evidence-memory", "path: candidate"),
+    ],
+)
+def test_should_keep_lane_uploads_literal_evidence_not_candidates(old: str, new: str) -> None:
+    # Given a lane upload whose name or path is computed or shaped like a release candidate
+    # When the workflow is evaluated
+    codes = _native_codes(_lane(old, new))
+
+    # Then it cannot masquerade as a Dagger-proven candidate
+    assert "native-lane-artifact" in codes
+
+
+def test_should_reject_local_action_paths_that_imitate_a_pin_everywhere() -> None:
+    # Given ordinary ingress whose checkout is a local action path ending in a fake pin
+    workflow = INGRESS.replace(f"actions/checkout@{ACTION}", f"./actions/checkout@{ACTION}", 1)
+    assert workflow != INGRESS
+
+    # When the repository is evaluated
+    codes = _codes(_snapshot(workflow))
+
+    # Then the fake pin is a mutable action
+    assert "mutable-action" in codes

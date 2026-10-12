@@ -24,7 +24,7 @@ from tree_sitter import Language, Node, Parser
 # move. A literal allow-list, never a pattern: a lookalike owner must still be refused.
 ALLOWED_OWNERS: Final = ("hseshadr", "gainratio")
 CENTRAL_OWNER: Final = "(?:" + "|".join(re.escape(owner) for owner in ALLOWED_OWNERS) + ")"
-PINNED_ACTION: Final = re.compile(r"^[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
+PINNED_ACTION: Final = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
 REMOTE_MODULE_SHAPE: Final = re.compile(
     r"^github\.com/(?P<owner>[^/]+)/(?P<repo>[^/@]+)"
     r"(?:/(?P<subpath>[^@]*))?@(?P<sha>[0-9a-f]{40})$"
@@ -106,9 +106,24 @@ NATIVE_MACOS_LANES: Final = frozenset(
 )
 # The one stable acceptance job that only tests the lanes' results (deploy gates on its name).
 NATIVE_LANE_GATES: Final = frozenset((("almamesh", NATIVE_LANE_WORKFLOW, "webkit-macos"),))
-MACOS_RUNNER: Final = re.compile(r"macos-[0-9a-z.-]+")
+# Literal GitHub-hosted macOS labels only: never an expression, a list, or a self-hosted label.
+MACOS_RUNNER: Final = re.compile(
+    r"macos-(?:latest|1[3-9]|2[0-9])(?:-(?:large|xlarge|intel|arm64))?"
+)
+# Events whose runs use the PR head's own read-only token; nothing that runs base-repo context.
+NATIVE_TRIGGERS: Final = frozenset(("push", "pull_request", "workflow_dispatch", "merge_group"))
+# The only actions a native lane may use (almamesh MACOS_LANE_ACTIONS), each still SHA-pinned.
+NATIVE_LANE_ACTIONS: Final = frozenset(
+    (CHECKOUT, "oven-sh/setup-bun", "astral-sh/setup-uv", UPLOAD_ACTION)
+)
+CANDIDATE_PATHS: Final = frozenset(("candidate", "release"))
 READ_ONLY_SCOPES: Final = frozenset(("read", "none"))
-NATIVE_CREDENTIAL: Final = re.compile(r"secrets\s*[.\[]|github\s*\.\s*token\b", re.IGNORECASE)
+# Any mention of the secrets context, the job token, or the whole github context (toJSON(github)).
+NATIVE_CREDENTIAL: Final = re.compile(
+    r"\bsecrets\b|\bgithub_token\b"
+    r"|\bgithub\s*(?:[,)]|\.\s*token\b|\[\s*\\?['\"]token\\?['\"]\s*\])",
+    re.IGNORECASE,
+)
 GATE_RUN: Final = re.compile(r'test "\$[A-Z_]+" = success(?: && test "\$[A-Z_]+" = success)*')
 GATE_VARIABLE: Final = re.compile(r"\$([A-Z_]+)")
 NEEDS_RESULT: Final = re.compile(r"\$\{\{ needs\.([\w-]+)\.result \}\}")
@@ -478,10 +493,42 @@ def scalar_text(value: Scalar | None) -> str:
 def parse_workflow(source: SourceFile) -> WorkflowDocument | PolicyFinding:
     """Parse and validate one complete workflow document."""
     try:
-        document = normalize_on_key(yaml.safe_load(source.text))
+        document = normalize_on_key(load_unique_yaml(source.text))
         return TypeAdapter(WorkflowDocument).validate_python(document)
     except (yaml.YAMLError, ValidationError) as error:
         return finding("workflow-schema", source.path, str(error))
+
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """A SafeLoader that refuses duplicate mapping keys, as GitHub's workflow parser does.
+
+    PyYAML silently keeps the last duplicate; refusing removes that parser differential.
+    """
+
+
+def construct_unique_mapping(
+    loader: UniqueKeyLoader, node: yaml.MappingNode
+) -> dict[object, object]:
+    """Construct one mapping, refusing any key written twice."""
+    loader.flatten_mapping(node)
+    keys = tuple(repr(loader.construct_object(key)) for key, _ in node.value)
+    if len(set(keys)) != len(keys):
+        raise yaml.constructor.ConstructorError(None, None, "duplicate key", node.start_mark)
+    return loader.construct_mapping(node)
+
+
+UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_unique_mapping
+)
+
+
+def load_unique_yaml(text: str) -> object:
+    """Safely load one YAML document whose mappings have unique keys."""
+    loader = UniqueKeyLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
 
 
 def normalize_on_key(document: object) -> object:
@@ -1115,8 +1162,45 @@ def validate_native_lane(
     )
     return (
         validate_pinned_actions(path, job.steps)
+        + validate_native_actions(path, job.steps)
         + checkouts
         + validate_native_boundary(document, path, job)
+    )
+
+
+def validate_native_actions(
+    path: str, steps: tuple[WorkflowStep, ...]
+) -> tuple[PolicyFinding, ...]:
+    """Allow only the reviewed lane actions, and uploads only of literal evidence."""
+    actions = tuple(
+        finding("native-lane-action", path, step.uses)
+        for step in steps
+        if step.uses and action_name(step) not in NATIVE_LANE_ACTIONS
+    )
+    return actions + validate_native_uploads(path, steps)
+
+
+def validate_native_uploads(
+    path: str, steps: tuple[WorkflowStep, ...]
+) -> tuple[PolicyFinding, ...]:
+    """Reject any lane upload that is not literal, non-candidate evidence."""
+    return tuple(
+        finding("native-lane-artifact", path, "upload must be literal, non-candidate evidence")
+        for step in steps
+        if action_name(step) == UPLOAD_ACTION and not native_upload_is_evidence(step)
+    )
+
+
+def native_upload_is_evidence(step: WorkflowStep) -> bool:
+    """Require a literal name and path that cannot pose as a Dagger-proven candidate."""
+    name = scalar_text(step.with_.get("name"))
+    upload_path = scalar_text(step.with_.get("path")).rstrip("/")
+    return all(
+        (
+            bool(name) and "${{" not in name,
+            bool(upload_path) and "${{" not in upload_path,
+            posixpath.basename(upload_path) not in CANDIDATE_PATHS,
+        )
     )
 
 
@@ -1157,9 +1241,9 @@ def workflow_triggers(document: WorkflowDocument) -> frozenset[str] | None:
 
 
 def triggers_are_unprivileged(document: WorkflowDocument) -> bool:
-    """Fail closed on pull_request_target or an `on` shape that cannot be read."""
+    """Allow only reviewed PR-scoped events; fail closed on an `on` shape that cannot be read."""
     triggers = workflow_triggers(document)
-    return triggers is not None and "pull_request_target" not in triggers
+    return triggers is not None and triggers <= NATIVE_TRIGGERS
 
 
 def validate_native_gate(
