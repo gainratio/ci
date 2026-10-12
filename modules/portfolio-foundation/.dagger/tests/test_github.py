@@ -1076,6 +1076,125 @@ def test_should_fail_when_main_head_has_no_dagger_check() -> None:
         _decide(api)
 
 
+OTHER_RUN_ID = 789
+OTHER_CHECK_ID = 124
+OTHER_STARTED_AT = "2026-08-27T00:01:02Z"
+
+
+@dataclass(frozen=True)
+class OtherRun:
+    """A second Dagger run on the same main HEAD (schedule, dispatch, or a foreign copy)."""
+
+    event: str = "schedule"
+    conclusion: str = "success"
+    owner: str = "owner"
+    full_name: str = "owner/repository"
+
+
+def _other_check(run: OtherRun) -> dict[str, object]:
+    details = f"https://github.com/{run.owner}/repository/actions/runs/{OTHER_RUN_ID}"
+    return _check_payload(
+        check_id=OTHER_CHECK_ID,
+        conclusion=run.conclusion,
+        started_at=OTHER_STARTED_AT,
+        completed_at=_one_second_after(OTHER_STARTED_AT),
+    ) | {"details_url": f"{details}/job/{OTHER_CHECK_ID}"}
+
+
+def _other_pages(run: OtherRun) -> dict[ApiTarget, HttpPage]:
+    job = json.loads(_job_payload(job_id=OTHER_CHECK_ID, conclusion=run.conclusion))
+    job |= {"run_id": OTHER_RUN_ID, "started_at": OTHER_STARTED_AT}
+    job["completed_at"] = _one_second_after(OTHER_STARTED_AT)
+    workflow = _workflow_payload(
+        id=OTHER_RUN_ID,
+        event=run.event,
+        conclusion=run.conclusion,
+        created_at="2026-08-27T00:01:00Z",
+        run_started_at="2026-08-27T00:01:01Z",
+        updated_at="2026-08-27T00:01:04Z",
+        repository={"full_name": run.full_name},
+    )
+    attempt = ApiTarget(f"/repos/owner/repository/actions/runs/{OTHER_RUN_ID}/attempts/1")
+    return {_job_target(OTHER_CHECK_ID): HttpPage(json.dumps(job)), attempt: HttpPage(workflow)}
+
+
+def _push_then_other_api(run: OtherRun, push_conclusion: str = "success") -> FakeApi:
+    repo, branch, checks, workflow = _targets()
+    push = _check_payload(conclusion=push_conclusion)
+    return FakeApi(
+        {
+            repo: HttpPage(_repository_payload()),
+            branch: HttpPage(_branch_payload()),
+            checks: HttpPage(_checks_payload(push, _other_check(run))),
+            _job_target(): HttpPage(_job_payload(conclusion=push_conclusion)),
+            workflow: HttpPage(_workflow_payload(conclusion=push_conclusion)),
+            **_other_pages(run),
+        }
+    )
+
+
+@pytest.mark.parametrize("event", ("schedule", "workflow_dispatch"))
+@pytest.mark.parametrize("conclusion", ("success", "failure"))
+def test_should_deploy_green_push_attempt_when_a_later_non_push_dagger_run_exists(
+    event: str, conclusion: str
+) -> None:
+    # Given: edge-reco 4ffd8ad, a scheduled Dagger run landed on main HEAD after the push run.
+    api = _push_then_other_api(OtherRun(event=event, conclusion=conclusion))
+
+    # When
+    decision = _decide(api)
+
+    # Then: the non-push run is ignored and the push attempt is the evidence.
+    assert decision.action == "deploy"
+    assert decision.evidence is not None
+    assert decision.evidence.workflow_run_id == str(RUN_ID)
+
+
+def test_should_refuse_when_main_head_has_only_a_non_push_dagger_run() -> None:
+    # Given
+    repo, branch, checks, _ = _targets()
+    run = OtherRun()
+    api = FakeApi(
+        {
+            repo: HttpPage(_repository_payload()),
+            branch: HttpPage(_branch_payload()),
+            checks: HttpPage(_checks_payload(_other_check(run))),
+            **_other_pages(run),
+        }
+    )
+
+    # When / Then
+    with pytest.raises(GitHubPolicyError, match="no push-triggered"):
+        _decide(api)
+
+
+def test_should_refuse_red_push_attempt_when_a_later_schedule_run_is_green() -> None:
+    # Given
+    api = _push_then_other_api(OtherRun(), push_conclusion="failure")
+
+    # When / Then
+    with pytest.raises(GitHubPolicyError, match=r"latest.*not successful"):
+        _decide(api)
+
+
+@pytest.mark.parametrize(
+    ("run", "message"),
+    [
+        (OtherRun(owner="fork"), "details URL"),
+        (OtherRun(full_name="fork/repository"), "workflow attempt identity"),
+    ],
+)
+def test_should_refuse_when_a_non_push_dagger_run_is_bound_to_another_repository(
+    run: OtherRun, message: str
+) -> None:
+    # Given
+    api = _push_then_other_api(run)
+
+    # When / Then
+    with pytest.raises(GitHubPolicyError, match=message):
+        _decide(api)
+
+
 def test_should_skip_without_reading_checks_when_requested_commit_is_superseded() -> None:
     # Given: main HEAD is NEWER, the deploy asks for the older SHA.
     api = RecordingApi(_api(ApiOverrides(branch=_branch_payload(commit={"sha": NEWER}))))

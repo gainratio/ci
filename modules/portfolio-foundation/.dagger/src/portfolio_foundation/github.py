@@ -822,9 +822,17 @@ async def _attempt_contexts(
 ) -> tuple[_AttemptContext, ...]:
     applicable = tuple(check for check in checks if _is_applicable(check, commit_sha))
     _require_context_count(applicable)
-    return tuple(
-        [await _attempt_context(api, repository, check, commit_sha) for check in applicable]
-    )
+    contexts = [await _attempt_context(api, repository, check, commit_sha) for check in applicable]
+    return _push_contexts(tuple(contexts))
+
+
+def _push_contexts(contexts: tuple[_AttemptContext, ...]) -> tuple[_AttemptContext, ...]:
+    # A schedule or workflow_dispatch run of the same bound workflow on main HEAD is not
+    # deploy evidence; drop it instead of letting it veto the push attempt.
+    pushed = tuple(context for context in contexts if context.workflow.event == WORKFLOW_EVENT)
+    if not pushed:
+        raise GitHubPolicyError("GitHub has no push-triggered Dagger workflow attempt")
+    return pushed
 
 
 def _require_context_count(checks: tuple[GitHubCheckRun, ...]) -> None:
@@ -896,7 +904,7 @@ def _require_workflow_binding(
 ) -> None:
     identity = _workflow_identity(workflow)
     expected = (job.run_id, job.run_attempt, WORKFLOW_NAME, WORKFLOW_PATH, commit_sha)
-    policy = workflow.head_branch == DEFAULT_BRANCH and workflow.event == WORKFLOW_EVENT
+    policy = workflow.head_branch == DEFAULT_BRANCH
     policy = policy and workflow.repository.full_name == _repository_name(repository)
     if identity != expected or not policy:
         raise GitHubPolicyError("GitHub workflow attempt identity differs")
