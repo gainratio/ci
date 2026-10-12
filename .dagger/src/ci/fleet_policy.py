@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import chain
 from types import MappingProxyType
-from typing import Final, TypeIs
+from typing import Final, Literal, TypeIs
 
 import tree_sitter_typescript as ts_typescript
 import yaml
@@ -1116,7 +1116,7 @@ def validate_workflow(
     return tuple(
         item
         for job_id, job in parsed.jobs.items()
-        for item in route_job(parsed, JobScope(repository, source.path, job_id), job, engine)
+        for item in validate_job(parsed, JobScope(repository, source.path, job_id), job, engine)
     )
 
 
@@ -1129,19 +1129,33 @@ class JobScope:
     job_id: str
 
 
-def route_job(
+def validate_job(
     document: WorkflowDocument, scope: JobScope, job: WorkflowJob, engine: str
 ) -> tuple[PolicyFinding, ...]:
-    """Send reviewed native macOS lanes to their exception, everything else to thin ingress."""
-    key = (scope.repository, scope.path, scope.job_id)
+    """The only per-job entry point: base checks, then the one native-lane decision.
+
+    Every job gets the base checks. A reviewed native lane or gate adds its safety rules in
+    place of the thin-ingress shape rules; every other job gets defaults and shape rules.
+    """
     base = validate_base_job(scope.path, job.steps, engine)
-    if key in NATIVE_MACOS_LANES and MACOS_RUNNER.fullmatch(job.runs_on or ""):
+    kind = native_exception(scope, job)
+    if kind == "lane":
         return base + validate_native_lane(document, scope.path, job)
-    if key in NATIVE_LANE_GATES:
+    if kind == "gate":
         return base + validate_native_gate(document, scope, job)
-    return validate_job_defaults(scope.path, job) + validate_job(
-        scope.path, job, engine, scope.repository
+    return (
+        base
+        + validate_job_defaults(scope.path, job)
+        + validate_ingress_shape(scope.path, job, engine, scope.repository)
     )
+
+
+def native_exception(scope: JobScope, job: WorkflowJob) -> Literal["lane", "gate"] | None:
+    """Decide once whether a job is a reviewed native lane, its gate, or neither."""
+    key = (scope.repository, scope.path, scope.job_id)
+    if key in NATIVE_MACOS_LANES and MACOS_RUNNER.fullmatch(job.runs_on or ""):
+        return "lane"
+    return "gate" if key in NATIVE_LANE_GATES else None
 
 
 def validate_job_defaults(path: str, job: WorkflowJob) -> tuple[PolicyFinding, ...]:
@@ -1324,13 +1338,11 @@ def gate_results(step: WorkflowStep) -> frozenset[str] | None:
     return frozenset(item.group(1) for item in matches if item)
 
 
-def validate_job(
-    path: str, job: WorkflowJob, engine_version: str | None = None, repository: str = ""
+def validate_ingress_shape(
+    path: str, job: WorkflowJob, engine_version: str | None, repository: str
 ) -> tuple[PolicyFinding, ...]:
-    """Dispatch a job to its only accepted execution shape."""
-    common = validate_base_job(path, job.steps, engine_version) + validate_shell_steps(
-        path, job.steps
-    )
+    """Dispatch a non-excepted job to its only accepted thin-ingress shape."""
+    common = validate_shell_steps(path, job.steps)
     names = tuple(map(action_name, job.steps))
     if UPLOAD_ACTION in names:
         return common + validate_candidate(path, job.steps)

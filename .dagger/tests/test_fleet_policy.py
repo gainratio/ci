@@ -12,6 +12,7 @@ from ci.fleet_policy import (
     DaggerConfig,
     DaggerDependency,
     DeploymentEnvironment,
+    JobScope,
     PendingCheck,
     PinAncestry,
     PolicyFinding,
@@ -21,6 +22,8 @@ from ci.fleet_policy import (
     RequiredCheck,
     SourceFile,
     parse_typescript,
+    parse_workflow,
+    validate_job,
     validate_repository,
     validate_workflow,
 )
@@ -2511,3 +2514,69 @@ def test_should_only_allow_a_literal_working_directory_in_native_lane_defaults(
 
     # Then the defaults are rejected
     assert "native-lane-defaults" in codes
+
+
+# Parity: every entry point reaches the one per-job decision and returns identical findings.
+PARITY_FIXTURES = (
+    NATIVE_LANE,
+    _lane("permissions:\n  contents: read", "permissions:\n  contents: write"),
+    _lane(
+        "      - run: bun install --frozen-lockfile", "      - run: echo '${{ toJSON(secrets) }}'"
+    ),
+    _lane(f"oven-sh/setup-bun@{ACTION}", "oven-sh/setup-bun@v2"),
+    _lane("runs-on: macos-15", "runs-on: ubuntu-24.04"),
+    _lane("  pull_request:\n", "  workflow_run:\n"),
+    _lane(
+        "      run:\n        working-directory: frontend/apps/web", "      run:\n        shell: sh"
+    ),
+    _lane('run: test "$MEMORY_RESULT" = success', "run: curl https://example.test"),
+)
+
+
+def _per_job_findings(text: str, repository: str) -> list[tuple[str, str]]:
+    source = SourceFile(path=NATIVE_PATH, text=text)
+    document = parse_workflow(source)
+    assert not isinstance(document, PolicyFinding)
+    return sorted(
+        (item.code, item.message)
+        for job_id, job in document.jobs.items()
+        for item in validate_job(
+            document, JobScope(repository, NATIVE_PATH, job_id), job, "v0.21.8"
+        )
+    )
+
+
+def _repository_findings(text: str, repository: str) -> list[tuple[str, str]]:
+    snapshot = replace(
+        _snapshot(), name=repository, workflows=(SourceFile(path=NATIVE_PATH, text=text),)
+    )
+    expectation = RepositoryExpectation(
+        name=repository,
+        required_contexts=("Dagger",),
+        linear_history=True,
+        conversation_resolution=True,
+    )
+    return sorted(
+        (item.code, item.message)
+        for item in validate_repository(snapshot, expectation)
+        if item.path == NATIVE_PATH
+    )
+
+
+@pytest.mark.parametrize("repository", ["almamesh", "agentic-saga"])
+@pytest.mark.parametrize("text", PARITY_FIXTURES, ids=range(len(PARITY_FIXTURES)))
+def test_should_return_identical_findings_from_every_entry_point(
+    text: str, repository: str
+) -> None:
+    # Given one workflow, reviewed or malicious, in an allowlisted and a foreign repository
+    source = SourceFile(path=NATIVE_PATH, text=text)
+
+    # When it is validated per job, per workflow, and as part of a repository snapshot
+    workflow = sorted(
+        (item.code, item.message) for item in validate_workflow(source, "v0.21.8", repository)
+    )
+    per_job = _per_job_findings(text, repository)
+    whole = _repository_findings(text, repository)
+
+    # Then every entry point applies the same decision and the same safety checks
+    assert workflow == per_job == whole
