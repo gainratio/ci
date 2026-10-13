@@ -35,6 +35,7 @@ PAYLOAD_PARTS: Final = (
     "666978747572652d7369676e65723030",
 )
 EXPECTED_FINDINGS: Final = 2
+STATELESS_CANARY_MISS: Final = "guard-canary-missed: stateless"
 PACKAGE_REPOSITORY: Final = "hseshadr/edgeproc-core"
 PACKAGE_URL: Final = "https://github.com/hseshadr/edgeproc-core.git"
 PACKAGE_SHA: Final = "0bf2a8394b205f099b14b71303627ef871715622"
@@ -71,13 +72,25 @@ async def _source_guard() -> None:
 
 async def _alma_gitleaks_contract() -> None:
     history = _alma_history()
-    await dag.foundation().guard(history, ALMA_REPOSITORY, ALMA_COMMIT_SHA).sync()
+    await _require_guard_refuses_stale_policy(history)
     fresh = _fresh_copy(history)
     snapshot = await _snapshot_copy(history)
     await asyncio.gather(
         _require_detector_rejection(fresh, history=True, marker="fresh-copy"),
         _require_detector_rejection(snapshot, history=False, marker="snapshot-copy"),
     )
+
+
+async def _require_guard_refuses_stale_policy(history: dagger.Directory) -> None:
+    # The pinned AlmaMesh policy predates the stateless ghs_ rule, so the guard's canary
+    # must refuse it. Re-pin ALMA_COMMIT_SHA to a commit with the rule to restore a pass.
+    try:
+        await dag.foundation().guard(history, ALMA_REPOSITORY, ALMA_COMMIT_SHA).sync()
+    except dagger.ExecError as error:
+        if STATELESS_CANARY_MISS in error.stderr:
+            return
+        raise
+    raise ValueError("guard accepted a policy without the stateless GitHub token rule")
 
 
 def _alma_history() -> dagger.Directory:
