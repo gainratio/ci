@@ -429,6 +429,27 @@ Secret values never belong in command-line arguments, logs, Dagger outputs, arti
 persistent caches. The modules mount provider credentials and responses only in ephemeral Dagger
 storage and return non-secret evidence.
 
+### Secret-scan config
+
+`foundation.guard` scans with the consumer's `.gitleaks.toml` when one exists, and otherwise with
+the foundation config: every upstream gitleaks rule plus `github-app-token-stateless`, which
+catches GitHub's stateless `ghs_<APPID>_<JWT>` App and Actions tokens that gitleaks 8.30.1 misses
+([gitleaks#2192](https://github.com/gitleaks/gitleaks/issues/2192)). Before scanning, the guard
+runs a classic `ghp_` canary and a stateless `ghs_` canary through that same config, so a config
+that loads no rules (no `[extend] useDefault = true`) or lacks the stateless rule fails the guard
+with `guard-canary-missed`. A consumer config therefore needs both:
+
+```toml
+[extend]
+useDefault = true
+
+[[rules]]
+id = "github-app-token-stateless"
+description = "GitHub App installation or Actions token (stateless ghs_<APPID>_<JWT> format)"
+regex = '''ghs_[A-Za-z0-9._-]{36,}'''
+keywords = ["ghs_"]
+```
+
 ## Pages delivery safety and ordering
 
 Every provider entrypoint requires a foundation-verified envelope and exact-current-`main` green

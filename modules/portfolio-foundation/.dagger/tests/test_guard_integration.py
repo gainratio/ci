@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import base64
+import json
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from portfolio_foundation.guard import ACTIONLINT_IMAGE, GITLEAKS_IMAGE, actionlint_command
+import pytest
+
+from portfolio_foundation.guard import (
+    ACTIONLINT_IMAGE,
+    FOUNDATION_CONFIG_PATH,
+    FOUNDATION_GITLEAKS_CONFIG,
+    GITLEAKS_IMAGE,
+    actionlint_command,
+    canary_command,
+)
 
 
 @dataclass(frozen=True)
@@ -329,3 +340,89 @@ def test_should_reject_unknown_self_hosted_label_without_consumer_config(tmp_pat
     # Then
     assert result.returncode != 0, "unknown runner label unexpectedly passed"
     assert 'label "custom-runner-4" is unknown' in result.stdout
+
+
+ZERO_RULE_CONFIG = '[allowlist]\ndescription = "allowlist only"\npaths = ["^\\\\.env$"]\n'
+DEFAULTS_ONLY_CONFIG = "[extend]\nuseDefault = true\n"
+
+
+def _segment(payload: dict[str, object]) -> str:
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def _stateless_token() -> str:
+    # Built at runtime: the repository never holds a detector-shaped literal.
+    header = _segment({"alg": "RS256", "typ": "JWT", "kid": "s2s"})
+    claims = _segment(
+        {"iat": 1792000000, "exp": 1792003600, "iss": "github", "app": 1234567, "inst": 87654321}
+    )
+    return "ghs" + "_1234567_" + ".".join((header, claims, ("Ab9-Cd8_Ef7" * 32)[:342]))
+
+
+def _foundation_config(tmp_path: Path) -> Path:
+    path = tmp_path / "foundation.toml"
+    path.write_text(FOUNDATION_GITLEAKS_CONFIG)
+    return path
+
+
+def _detector_canary(tmp_path: Path, repo_config: str | None) -> subprocess.CompletedProcess[str]:
+    docker = shutil.which("docker")
+    assert docker is not None, "Docker is required for the real canary contract"
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    if repo_config is not None:
+        (snapshot / ".gitleaks.toml").write_text(repo_config)
+    foundation = f"{_foundation_config(tmp_path)}:{FOUNDATION_CONFIG_PATH}:ro"
+    mounts = ("-v", f"{snapshot}:/snapshot:ro", "-v", foundation, "--entrypoint", "sh")
+    program = ("-ceu", canary_command())
+    return _run(docker, "run", "--rm", *mounts, GITLEAKS_IMAGE, *program, cwd=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("repo_config", "missed"),
+    [(ZERO_RULE_CONFIG, "classic"), (DEFAULTS_ONLY_CONFIG, "stateless")],
+    ids=["config-with-zero-rules", "config-without-stateless-rule"],
+)
+def test_should_fail_canary_when_repository_config_misses_github_tokens(
+    tmp_path: Path, repo_config: str, missed: str
+) -> None:
+    # Given / When
+    result = _detector_canary(tmp_path, repo_config)
+
+    # Then
+    assert result.returncode != 0, result.stdout
+    assert f"guard-canary-missed: {missed}" in result.stdout
+    assert "guard-canary-detected" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "repo_config", [None, FOUNDATION_GITLEAKS_CONFIG], ids=["foundation-config", "repo-config"]
+)
+def test_should_pass_canary_when_scan_config_has_stateless_rule(
+    tmp_path: Path, repo_config: str | None
+) -> None:
+    # Given / When
+    result = _detector_canary(tmp_path, repo_config)
+
+    # Then
+    assert result.returncode == 0, result.stdout
+    assert "guard-canary-detected" in result.stdout
+
+
+def test_should_detect_real_length_stateless_token_only_with_foundation_rule(
+    tmp_path: Path,
+) -> None:
+    # Given
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "deploy.env").write_text(f"export GITHUB_TOKEN={_stateless_token()}\n")
+
+    # When
+    upstream = _detect(snapshot, history=False)
+    foundation = _detect(snapshot, history=False, config=_foundation_config(tmp_path))
+
+    # Then
+    assert upstream.returncode == 0, upstream.stdout
+    assert foundation.returncode != 0, foundation.stdout
+    assert re.search(r"RuleID:\s+github-app-token-stateless", foundation.stdout)

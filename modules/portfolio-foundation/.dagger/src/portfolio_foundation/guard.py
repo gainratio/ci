@@ -19,9 +19,38 @@ GITLEAKS_IMAGE: Final = (
 )
 ACTIONLINT_PATH: Final = "/usr/local/bin/actionlint"
 CANARY_EXIT_CODE: Final = 86
-
-
+CANARY_ROOT: Final = "/tmp/canary"  # noqa: S108 - scratch dir inside the throwaway guard container
 SNAPSHOT_ROOT: Final = "/snapshot"
+FOUNDATION_CONFIG_PATH: Final = "/etc/portfolio-foundation/gitleaks.toml"
+STATELESS_GITHUB_RULE_ID: Final = "github-app-token-stateless"
+# Used when a consumer ships no .gitleaks.toml: every upstream rule plus the GitHub token
+# format gitleaks 8.30.1 cannot see yet (https://github.com/gitleaks/gitleaks/issues/2192).
+FOUNDATION_GITLEAKS_CONFIG: Final = f"""title = "portfolio-foundation secret scan"
+
+[extend]
+useDefault = true
+
+# GitHub App installation tokens and Actions GITHUB_TOKEN use a stateless
+# ghs_<APPID>_<JWT> format (~520 chars, charset [A-Za-z0-9._-]) since 2026-10-02.
+# The built-in github-app-token rule only matches the classic 36-char form, so this
+# rule uses GitHub's documented pattern. Drop it once upstream covers the format.
+[[rules]]
+id = "{STATELESS_GITHUB_RULE_ID}"
+description = "GitHub App installation or Actions token (stateless ghs_<APPID>_<JWT> format)"
+regex = '''ghs_[A-Za-z0-9._-]{{36,}}'''
+keywords = ["ghs_"]
+"""
+# Canary values are assembled by printf at runtime so no detector-shaped literal is committed.
+# The stateless one must not match the classic rule, so it proves the stateless rule loaded.
+CANARY_PROBES: Final = (
+    ("classic", "printf 'ghp_%s%s\\n' '0123456789abcdefAB' 'CDEFGHIJKLMNOPQRST'"),
+    (
+        "stateless",
+        "printf 'ghs_%s_%s.%s.%s\\n' '1234567' 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9' "
+        "'eyJpc3MiOiJnaXRodWIiLCJhcHAiOjEyMzQ1NjcsInN1YiI6InBvcnRmb2xpby1jYW5hcnkifQ' "
+        "'c2lnbmF0dXJl-bm90LWEtY3JlZGVudGlhbA_Y2FuYXJ5LXByb2Jl'",
+    ),
+)
 
 
 def actionlint_command(root: str = SNAPSHOT_ROOT) -> str:
@@ -50,7 +79,19 @@ def _actionlint_config_commands(root: str) -> tuple[str, ...]:
 
 def secret_scan_command(commit_sha: str) -> str:
     """Return the canary, explicit snapshot, and canonical-history scan."""
-    return "\n".join(_canary_commands() + _snapshot_commands() + _history_commands(commit_sha))
+    scans = _snapshot_commands() + _history_commands(commit_sha)
+    return "\n".join((canary_command(), *scans))
+
+
+def canary_command(root: str = SNAPSHOT_ROOT, canary_root: str = CANARY_ROOT) -> str:
+    """Prove the config the real scan will use detects classic and stateless GitHub tokens."""
+    config = f"{root}/.gitleaks.toml"
+    select = (
+        f'canary_config="{FOUNDATION_CONFIG_PATH}"',
+        f'if test -f {config}; then canary_config="{config}"; fi',
+    )
+    probes = (line for probe in CANARY_PROBES for line in _canary_probe(canary_root, *probe))
+    return "\n".join((*select, *probes, "echo guard-canary-detected >&2"))
 
 
 def build_guard(
@@ -67,22 +108,23 @@ def _guard_container(snapshot: dagger.Directory, history: dagger.Directory) -> d
     actionlint = dag.container().from_(ACTIONLINT_IMAGE).file(ACTIONLINT_PATH)
     base = dag.container().from_(GITLEAKS_IMAGE).with_entrypoint([])
     base = base.with_file(ACTIONLINT_PATH, actionlint)
+    base = base.with_new_file(FOUNDATION_CONFIG_PATH, FOUNDATION_GITLEAKS_CONFIG)
     base = base.with_mounted_directory("/snapshot", snapshot, read_only=True)
     return base.with_mounted_directory("/repo", history, read_only=True)
 
 
-def _canary_commands() -> tuple[str, ...]:
+def _canary_probe(canary_root: str, name: str, generate: str) -> tuple[str, ...]:
+    probe = f"{canary_root}/{name}"
+    missed = f"guard-canary-missed: {name} GitHub token not detected by $canary_config"
     return (
-        'canary_dir="/tmp/canary"',
-        'mkdir -p "$canary_dir"',
-        'git init -q "$canary_dir"',
-        "printf 'ghp_%s%s\\n' '0123456789abcdefAB' 'CDEFGHIJKLMNOPQRST' > \"$canary_dir/canary\"",
+        f'mkdir -p "{probe}"',
+        f'git init -q "{probe}"',
+        f'{generate} > "{probe}/canary"',
         "set +e",
-        _gitleaks("$canary_dir", no_git=True, exit_code=CANARY_EXIT_CODE),
+        _gitleaks(probe, no_git=True, exit_code=CANARY_EXIT_CODE, config='"$canary_config"'),
         'canary_status="$?"',
         "set -e",
-        f'test "$canary_status" -eq {CANARY_EXIT_CODE}',
-        "echo guard-canary-detected >&2",
+        f'test "$canary_status" -eq {CANARY_EXIT_CODE} || {{ echo "{missed}" >&2; exit 1; }}',
     )
 
 
@@ -111,7 +153,9 @@ def _configured_gitleaks(
 ) -> tuple[str, ...]:
     config = f"{source}/.gitleaks.toml"
     configured = _gitleaks(source, no_git=no_git, log_options=log_options, config=config)
-    default = _gitleaks(source, no_git=no_git, log_options=log_options)
+    default = _gitleaks(
+        source, no_git=no_git, log_options=log_options, config=FOUNDATION_CONFIG_PATH
+    )
     return (f"if test -f {config}; then", f"  {configured}", "else", f"  {default}", "fi")
 
 
