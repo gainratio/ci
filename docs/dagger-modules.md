@@ -435,9 +435,15 @@ storage and return non-secret evidence.
 the foundation config: every upstream gitleaks rule plus `github-app-token-stateless`, which
 catches GitHub's stateless `ghs_<APPID>_<JWT>` App and Actions tokens that gitleaks 8.30.1 misses
 ([gitleaks#2192](https://github.com/gitleaks/gitleaks/issues/2192)). Before scanning, the guard
-runs a classic `ghp_` canary and a stateless `ghs_` canary through that same config, so a config
-that loads no rules (no `[extend] useDefault = true`) or lacks the stateless rule fails the guard
-with `guard-canary-missed`. A consumer config therefore needs both:
+runs a classic `ghp_` canary and a stateless `ghs_` canary through the exact config each scan
+uses (the snapshot's and the history checkout's `.gitleaks.toml` are canaried separately). The
+canary values are drawn from `/dev/urandom` at run time, with a random APPID and random
+base64url JWT segments about 520 characters long, and each one is written as `canary.py`,
+`canary.ts`, `canary.txt`, `canary.env`, and an extensionless `canary`. The guard fails with
+`guard-canary-missed` if any probe goes undetected, so these configs are refused: one that loads
+no rules (no `[extend] useDefault = true`), one without the stateless rule, one whose rule is
+narrowed to a single APPID or token, and one with a path allowlist that skips a file type. A
+consumer config therefore needs both:
 
 ```toml
 [extend]

@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -23,6 +24,7 @@ from portfolio_foundation.guard import (
     actionlint_command,
     build_guard,
     canary_command,
+    scan_config_variable,
     secret_scan_command,
 )
 from portfolio_foundation.identity import CommitIdentity, FullSha, RepositoryRef
@@ -210,20 +212,36 @@ def test_should_scan_nonempty_snapshot_and_all_canonical_history() -> None:
     assert "--source /repo --log-opts=--all" in command
 
 
-def test_should_apply_repository_config_to_snapshot_and_history() -> None:
+def test_should_apply_each_canaried_config_to_its_own_scan() -> None:
     # Given
     command = secret_scan_command("c" * 40)
+    snapshot, history = (scan_config_variable(root) for root in ("/snapshot", "/repo"))
 
-    # When / Then
-    assert "test -f /snapshot/.gitleaks.toml" in command
-    assert "--config /snapshot/.gitleaks.toml" in command
-    assert "test -f /repo/.gitleaks.toml" in command
-    assert "--config /repo/.gitleaks.toml" in command
+    # When
+    real = ("gitleaks detect --source /snapshot ", "gitleaks detect --source /repo ")
+    scans = [line for line in command.splitlines() if line.startswith(real)]
+
+    # Then
+    assert (
+        f'if test -f /snapshot/.gitleaks.toml; then {snapshot}="/snapshot/.gitleaks.toml"'
+        in command
+    )
+    assert f'if test -f /repo/.gitleaks.toml; then {history}="/repo/.gitleaks.toml"' in command
+    assert scans[0].startswith(
+        f'gitleaks detect --source /snapshot --no-git --config "${snapshot}"'
+    )
+    assert scans[1].startswith(
+        f'gitleaks detect --source /repo --log-opts=--all --config "${history}"'
+    )
 
 
 CLASSIC_PAT = r"ghp_[A-Za-z0-9]{36}"
 CLASSIC_APP_PATTERN = r"(?:ghu|ghs)_[0-9a-zA-Z]{36}"  # gitleaks 8.30.1 github-app-token
 STATELESS_GHS = r"ghs_[A-Za-z0-9._-]{36,}"  # GitHub's documented stateless-token pattern
+STATELESS_SHAPE = (
+    r"ghs_[1-9][0-9]{2,8}_eyJ[A-Za-z0-9_-]{33}\.eyJ[A-Za-z0-9_-]{128,159}\.[A-Za-z0-9_-]{342}"
+)
+PROBED_FILES = ("canary.py", "canary.ts", "canary.txt", "canary.env", "canary")
 FAKE_GITLEAKS = """#!/bin/sh
 while test "$#" -gt 0; do
   case "$1" in
@@ -232,8 +250,13 @@ while test "$#" -gt 0; do
   esac
   shift
 done
-printf '%s %s\\n' "$config" "$(cat "$source/canary")" >> "$(dirname "$0")/calls"
-case "$(cat "$source/canary")" in
+file="$(ls "$source")"
+token="$(cat "$source/$file")"
+printf '%s %s %s\\n' "$config" "$file" "$token" >> "$(dirname "$0")/calls"
+case "$file" in
+  $FAKE_SKIPS) exit 0 ;;
+esac
+case "$token" in
   *"$FAKE_DETECTS"*) exit 86 ;;
 esac
 exit 0
@@ -261,9 +284,16 @@ def _foundation_rule() -> dict[str, object]:
     return cast(dict[str, object], rules[0])
 
 
+@dataclass(frozen=True)
+class CanaryCall:
+    config: str
+    file: str
+    token: str
+
+
 def _run_canary(
-    tmp_path: Path, *, repo_config: bool, detects: str
-) -> tuple[subprocess.CompletedProcess[str], tuple[str, ...]]:
+    tmp_path: Path, *, repo_config: bool, detects: str, skips: str = "none"
+) -> tuple[subprocess.CompletedProcess[str], tuple[CanaryCall, ...]]:
     snapshot, tools = tmp_path / "snapshot", tmp_path / "bin"
     snapshot.mkdir()
     tools.mkdir()
@@ -273,12 +303,22 @@ def _run_canary(
     fake.write_text(FAKE_GITLEAKS)
     fake.chmod(0o755)
     program = canary_command(str(snapshot), str(tmp_path / "canary"))
-    environment = {"PATH": f"{tools}:/usr/bin:/bin", "FAKE_DETECTS": detects}
+    environment = {"PATH": f"{tools}:/usr/bin:/bin", "FAKE_DETECTS": detects, "FAKE_SKIPS": skips}
     result = subprocess.run(  # noqa: S603
         ("/bin/sh", "-ceu", program), env=environment, capture_output=True, text=True, check=False
     )
     calls = tools / "calls"
-    return result, tuple(calls.read_text().splitlines()) if calls.exists() else ()
+    lines = calls.read_text().splitlines() if calls.exists() else []
+    return result, tuple(CanaryCall(*line.split(" ", 2)) for line in lines)
+
+
+def _canaried_tokens(tmp_path: Path) -> tuple[str, str]:
+    result, calls = _run_canary(tmp_path, repo_config=False, detects="gh")
+    assert result.returncode == 0, result.stderr
+    classic = {call.token for call in calls if call.token.startswith("ghp_")}
+    stateless = {call.token for call in calls if call.token.startswith("ghs_")}
+    assert len(classic) == len(stateless) == 1
+    return classic.pop(), stateless.pop()
 
 
 def test_should_keep_upstream_rules_in_foundation_config() -> None:
@@ -307,20 +347,55 @@ def test_should_detect_stateless_github_tokens_with_foundation_rule() -> None:
     assert re.search(CLASSIC_APP_PATTERN, token) is None
 
 
-def test_should_generate_canaries_for_classic_and_stateless_github_tokens(
-    tmp_path: Path,
-) -> None:
+def test_should_probe_every_file_type_with_both_github_token_kinds(tmp_path: Path) -> None:
     # Given / When
     result, calls = _run_canary(tmp_path, repo_config=False, detects="gh")
 
     # Then
     assert result.returncode == 0, result.stderr
-    tokens = tuple(call.split(" ", 1)[1] for call in calls)
-    assert len(tokens) == 2
-    assert re.fullmatch(CLASSIC_PAT, tokens[0])
-    assert re.fullmatch(str(_foundation_rule()["regex"]), tokens[1])
-    assert re.search(CLASSIC_APP_PATTERN, tokens[1]) is None
+    probed = sorted((call.token[:4], call.file) for call in calls)
+    assert probed == sorted((kind, file) for kind in ("ghp_", "ghs_") for file in PROBED_FILES)
     assert "guard-canary-detected" in result.stderr
+
+
+def test_should_generate_realistic_github_tokens_at_runtime(tmp_path: Path) -> None:
+    # Given / When
+    classic, stateless = _canaried_tokens(tmp_path)
+
+    # Then
+    assert re.fullmatch(CLASSIC_PAT, classic)
+    assert re.fullmatch(STATELESS_SHAPE, stateless)
+    assert re.fullmatch(str(_foundation_rule()["regex"]), stateless)
+    assert re.search(CLASSIC_APP_PATTERN, stateless) is None
+    assert 500 <= len(stateless) <= 560
+
+
+def test_should_draw_fresh_canary_values_on_every_run(tmp_path: Path) -> None:
+    # Given
+    runs = [tmp_path / str(index) for index in range(4)]
+    for run in runs:
+        run.mkdir()
+
+    # When
+    tokens = [_canaried_tokens(run) for run in runs]
+
+    # Then
+    assert len({classic for classic, _ in tokens}) == len(runs)
+    assert len({stateless.split("_")[1] for _, stateless in tokens}) > 1
+    assert len({stateless.split("_", 2)[2] for _, stateless in tokens}) == len(runs)
+
+
+@pytest.mark.parametrize("skipped", PROBED_FILES)
+def test_should_fail_when_the_scan_config_skips_one_probed_file_type(
+    tmp_path: Path, skipped: str
+) -> None:
+    # Given / When
+    result, _ = _run_canary(tmp_path, repo_config=True, detects="gh", skips=skipped)
+
+    # Then
+    assert result.returncode != 0
+    assert f"guard-canary-missed: classic GitHub token in {skipped} not detected" in result.stderr
+    assert "guard-canary-detected" not in result.stderr
 
 
 @pytest.mark.parametrize("repo_config", [True, False])
@@ -333,7 +408,7 @@ def test_should_run_canary_against_the_config_the_real_scan_uses(
     # Then
     expected = str(tmp_path / "snapshot" / ".gitleaks.toml") if repo_config else None
     assert result.returncode == 0, result.stderr
-    assert {call.split(" ", 1)[0] for call in calls} == {expected or FOUNDATION_CONFIG_PATH}
+    assert {call.config for call in calls} == {expected or FOUNDATION_CONFIG_PATH}
 
 
 @pytest.mark.parametrize(
@@ -358,8 +433,8 @@ def test_should_apply_foundation_config_when_repository_has_none() -> None:
     command = secret_scan_command("c" * 40)
 
     # When / Then
-    assert command.count(f"--config {FOUNDATION_CONFIG_PATH}") == 2
-    assert f'canary_config="{FOUNDATION_CONFIG_PATH}"' in command
+    for root in ("/snapshot", "/repo"):
+        assert f'{scan_config_variable(root)}="{FOUNDATION_CONFIG_PATH}"' in command
     assert re.search(r"gitleaks detect(?:(?!--config)[^\n])*$", command, re.MULTILINE) is None
 
 

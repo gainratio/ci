@@ -21,6 +21,7 @@ ACTIONLINT_PATH: Final = "/usr/local/bin/actionlint"
 CANARY_EXIT_CODE: Final = 86
 CANARY_ROOT: Final = "/tmp/canary"  # noqa: S108 - scratch dir inside the throwaway guard container
 SNAPSHOT_ROOT: Final = "/snapshot"
+HISTORY_ROOT: Final = "/repo"
 FOUNDATION_CONFIG_PATH: Final = "/etc/portfolio-foundation/gitleaks.toml"
 STATELESS_GITHUB_RULE_ID: Final = "github-app-token-stateless"
 # Used when a consumer ships no .gitleaks.toml: every upstream rule plus the GitHub token
@@ -40,17 +41,32 @@ description = "GitHub App installation or Actions token (stateless ghs_<APPID>_<
 regex = '''ghs_[A-Za-z0-9._-]{{36,}}'''
 keywords = ["ghs_"]
 """
-# Canary values are assembled by printf at runtime so no detector-shaped literal is committed.
-# The stateless one must not match the classic rule, so it proves the stateless rule loaded.
+# Canary values are drawn from /dev/urandom at runtime: no detector-shaped literal is committed,
+# and a rule narrowed to one fixed APPID or JWT cannot pass. The stateless one must not match
+# the classic rule, so it proves the stateless rule loaded. Its shape follows GitHub's format:
+# ghs_<APPID>_<header>.<claims>.<signature>, base64url JWT segments, about 520 chars in all.
+CANARY_RANDOM: Final = (
+    'canary_random() { LC_ALL=C tr -dc "$1" < /dev/urandom | head -c "$2"; }',
+    "canary_byte() { od -An -N1 -tu1 /dev/urandom | tr -d ' '; }",
+)
+BASE64URL: Final = "A-Za-z0-9_-"
 CANARY_PROBES: Final = (
-    ("classic", "printf 'ghp_%s%s\\n' '0123456789abcdefAB' 'CDEFGHIJKLMNOPQRST'"),
+    ("classic", ('canary_token="ghp_$(canary_random A-Za-z0-9 36)"',)),
     (
         "stateless",
-        "printf 'ghs_%s_%s.%s.%s\\n' '1234567' 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9' "
-        "'eyJpc3MiOiJnaXRodWIiLCJhcHAiOjEyMzQ1NjcsInN1YiI6InBvcnRmb2xpby1jYW5hcnkifQ' "
-        "'c2lnbmF0dXJl-bm90LWEtY3JlZGVudGlhbA_Y2FuYXJ5LXByb2Jl'",
+        (
+            'appid_digits="$(( $(canary_byte) % 6 + 3 ))"',
+            'claims_length="$(( $(canary_byte) % 32 + 128 ))"',
+            'canary_token="ghs_$(canary_random 1-9 1)$(canary_random 0-9 "$appid_digits")"',
+            f'canary_token="${{canary_token}}_eyJ$(canary_random {BASE64URL} 33)"',
+            f'canary_token="${{canary_token}}.eyJ$(canary_random {BASE64URL} "$claims_length")"',
+            f'canary_token="${{canary_token}}.$(canary_random {BASE64URL} 342)"',
+        ),
     ),
 )
+# A path allowlist by extension would hide real secrets while an extensionless canary passed,
+# so every probe is written under each of these names and each one must be detected.
+CANARY_FILE_NAMES: Final = ("canary.py", "canary.ts", "canary.txt", "canary.env", "canary")
 
 
 def actionlint_command(root: str = SNAPSHOT_ROOT) -> str:
@@ -78,20 +94,39 @@ def _actionlint_config_commands(root: str) -> tuple[str, ...]:
 
 
 def secret_scan_command(commit_sha: str) -> str:
-    """Return the canary, explicit snapshot, and canonical-history scan."""
+    """Return the canaries, explicit snapshot scan, and canonical-history scan."""
+    canaries = (canary_command(root) for root in (SNAPSHOT_ROOT, HISTORY_ROOT))
     scans = _snapshot_commands() + _history_commands(commit_sha)
-    return "\n".join((canary_command(), *scans))
+    return "\n".join((*canaries, *scans))
 
 
 def canary_command(root: str = SNAPSHOT_ROOT, canary_root: str = CANARY_ROOT) -> str:
-    """Prove the config the real scan will use detects classic and stateless GitHub tokens."""
-    config = f"{root}/.gitleaks.toml"
-    select = (
-        f'canary_config="{FOUNDATION_CONFIG_PATH}"',
-        f'if test -f {config}; then canary_config="{config}"; fi',
+    """Prove the exact config the real scan of ``root`` uses detects GitHub tokens.
+
+    The selected path is kept in a per-root shell variable that the real scan then reads,
+    so the canaried config and the scanned config cannot drift apart.
+    """
+    variable = scan_config_variable(root)
+    probe_root = f"{canary_root}/{variable}"
+    probes = (
+        line for probe in CANARY_PROBES for line in _canary_probe(probe_root, variable, *probe)
     )
-    probes = (line for probe in CANARY_PROBES for line in _canary_probe(canary_root, *probe))
-    return "\n".join((*select, *probes, "echo guard-canary-detected >&2"))
+    select = _select_scan_config(root, variable)
+    return "\n".join((*select, *CANARY_RANDOM, *probes, "echo guard-canary-detected >&2"))
+
+
+def _select_scan_config(root: str, variable: str) -> tuple[str, ...]:
+    config = f"{root}/.gitleaks.toml"
+    return (
+        f'{variable}="{FOUNDATION_CONFIG_PATH}"',
+        f'if test -f {config}; then {variable}="{config}"; fi',
+    )
+
+
+def scan_config_variable(root: str) -> str:
+    """Return the shell variable holding the gitleaks config selected for ``root``."""
+    name = "".join(character if character.isalnum() else "_" for character in root.strip("/"))
+    return f"scan_config_{name}"
 
 
 def build_guard(
@@ -109,19 +144,30 @@ def _guard_container(snapshot: dagger.Directory, history: dagger.Directory) -> d
     base = dag.container().from_(GITLEAKS_IMAGE).with_entrypoint([])
     base = base.with_file(ACTIONLINT_PATH, actionlint)
     base = base.with_new_file(FOUNDATION_CONFIG_PATH, FOUNDATION_GITLEAKS_CONFIG)
-    base = base.with_mounted_directory("/snapshot", snapshot, read_only=True)
-    return base.with_mounted_directory("/repo", history, read_only=True)
+    base = base.with_mounted_directory(SNAPSHOT_ROOT, snapshot, read_only=True)
+    return base.with_mounted_directory(HISTORY_ROOT, history, read_only=True)
 
 
-def _canary_probe(canary_root: str, name: str, generate: str) -> tuple[str, ...]:
-    probe = f"{canary_root}/{name}"
-    missed = f"guard-canary-missed: {name} GitHub token not detected by $canary_config"
+def _canary_probe(
+    canary_root: str, variable: str, name: str, generate: tuple[str, ...]
+) -> tuple[str, ...]:
+    files = (
+        line
+        for file in CANARY_FILE_NAMES
+        for line in _canary_file(canary_root, variable, name, file)
+    )
+    return (*generate, *files)
+
+
+def _canary_file(canary_root: str, variable: str, name: str, file: str) -> tuple[str, ...]:
+    probe = f"{canary_root}/{name}/{file.replace('.', '-')}"
+    missed = f"guard-canary-missed: {name} GitHub token in {file} not detected by ${variable}"
     return (
         f'mkdir -p "{probe}"',
         f'git init -q "{probe}"',
-        f'{generate} > "{probe}/canary"',
+        f'printf \'%s\\n\' "$canary_token" > "{probe}/{file}"',
         "set +e",
-        _gitleaks(probe, no_git=True, exit_code=CANARY_EXIT_CODE, config='"$canary_config"'),
+        _gitleaks(probe, no_git=True, exit_code=CANARY_EXIT_CODE, config=f'"${variable}"'),
         'canary_status="$?"',
         "set -e",
         f'test "$canary_status" -eq {CANARY_EXIT_CODE} || {{ echo "{missed}" >&2; exit 1; }}',
@@ -132,7 +178,7 @@ def _snapshot_commands() -> tuple[str, ...]:
     return (
         'test -n "$(find /snapshot -type f -print -quit)"',
         "echo guard-snapshot-nonempty >&2",
-        *_configured_gitleaks("/snapshot", no_git=True),
+        _gitleaks(SNAPSHOT_ROOT, no_git=True, config=_scan_config(SNAPSHOT_ROOT)),
     )
 
 
@@ -144,19 +190,12 @@ def _history_commands(commit_sha: str) -> tuple[str, ...]:
         'test -n "$(git -C /repo rev-list --all)"',
         "git -C /repo fsck --full --no-dangling",
         "echo guard-history-verified >&2",
-        *_configured_gitleaks("/repo", log_options="--all"),
+        _gitleaks(HISTORY_ROOT, log_options="--all", config=_scan_config(HISTORY_ROOT)),
     )
 
 
-def _configured_gitleaks(
-    source: str, *, no_git: bool = False, log_options: str | None = None
-) -> tuple[str, ...]:
-    config = f"{source}/.gitleaks.toml"
-    configured = _gitleaks(source, no_git=no_git, log_options=log_options, config=config)
-    default = _gitleaks(
-        source, no_git=no_git, log_options=log_options, config=FOUNDATION_CONFIG_PATH
-    )
-    return (f"if test -f {config}; then", f"  {configured}", "else", f"  {default}", "fi")
+def _scan_config(root: str) -> str:
+    return f'"${scan_config_variable(root)}"'
 
 
 def _gitleaks(
