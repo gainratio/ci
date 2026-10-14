@@ -954,17 +954,44 @@ def test_should_accept_semantically_pinned_generated_language_lock(
 
 
 def test_should_reject_incompatible_engine_and_action_tuple() -> None:
-    # Given the config requests an older engine and the action pin is unreviewed
+    # Given the config requests an older engine than the action's version input
     source = "github.com/hseshadr/ci/modules/portfolio-foundation@" + "b" * 40
     configs = _shared_configs(source, engine="v0.21.7")
-    workflow = INGRESS.replace(DAGGER, "f" * 40)
-    snapshot = replace(_snapshot(workflow), dagger_configs=configs)
+    snapshot = replace(_snapshot(INGRESS), dagger_configs=configs)
 
-    # When the config, generated graph, action revision, and action version are compared
+    # When the config, generated graph, and action version are compared
     codes = _shared_codes(snapshot)
 
-    # Then both incompatible execution boundaries fail closed
-    assert {"incompatible-dagger-engine", "incompatible-dagger-action"} <= set(codes)
+    # Then the incompatible execution boundary fails closed
+    assert "incompatible-dagger-engine" in codes
+
+
+# CONTRACT REVERSAL (2026-10-14): the policy used to accept only a hand-kept list of reviewed
+# dagger-for-github SHAs, so every Dependabot bump of the action failed CI until a human re-pinned
+# the list. The property kept is immutability: any full-SHA pin passes, a tag or branch never does.
+def test_should_accept_a_dependabot_bump_of_the_pinned_dagger_action() -> None:
+    # Given Dependabot moved the Dagger action to another full commit SHA
+    workflow = INGRESS.replace(DAGGER, "f" * 40)
+    assert workflow != INGRESS
+
+    # When the repository is evaluated
+    codes = _shared_codes(_snapshot(workflow))
+
+    # Then the immutable pin is accepted without re-pinning any list
+    assert "incompatible-dagger-action" not in codes
+    assert "mutable-action" not in codes
+
+
+def test_should_reject_a_tag_pinned_dagger_action() -> None:
+    # Given the Dagger action is moved from a full SHA to a mutable tag
+    workflow = INGRESS.replace(f"dagger/dagger-for-github@{DAGGER}", "dagger/dagger-for-github@v8")
+    assert workflow != INGRESS
+
+    # When the repository is evaluated
+    codes = _shared_codes(_snapshot(workflow))
+
+    # Then the mutable ref fails closed
+    assert "mutable-action" in codes
 
 
 def test_should_reject_wrong_shared_module_publisher() -> None:
@@ -2537,10 +2564,10 @@ def test_should_reject_local_action_paths_that_imitate_a_pin_everywhere() -> Non
 
 # Excepted jobs get every base job check except the thin-ingress shape rules, plus native rules.
 def test_should_run_base_dagger_checks_on_an_excepted_lane() -> None:
-    # Given a lane that smuggles an unreviewed Dagger action with a caller-controlled argument
+    # Given a lane that smuggles a tag-pinned Dagger action with a caller-controlled argument
     text = _lane(
         f"      - uses: oven-sh/setup-bun@{ACTION}",
-        f"      - uses: dagger/dagger-for-github@{'9' * 40}\n"
+        "      - uses: dagger/dagger-for-github@v8\n"
         "        with:\n          version: '0.21.8'\n"
         "          args: ${{ github.event.pull_request.title }}",
     )
@@ -2549,7 +2576,7 @@ def test_should_run_base_dagger_checks_on_an_excepted_lane() -> None:
     codes = set(_native_codes(text))
 
     # Then the base checks still report it alongside the native rule
-    assert {"native-lane-action", "incompatible-dagger-action", "dagger-args-expression"} <= codes
+    assert {"native-lane-action", "mutable-action", "dagger-args-expression"} <= codes
 
 
 def test_should_run_base_checks_on_the_native_gate() -> None:

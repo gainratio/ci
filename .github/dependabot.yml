@@ -1,17 +1,23 @@
 # Keep THIS repo's full-SHA action pins current in one place. Dependabot's
 # github-actions ecosystem walks `uses:` refs in .github/workflows, updating both
-# each SHA and its trailing `# v...` comment. The security-policy test keeps nested
-# composites and copy-ready examples on immutable refs as they are updated — that
-# includes our OWN gainratio/ci refs, which must be full commit SHAs and never a
-# moving `@ci-vN` tag. Because consumers pin a SHA too, a bump reaches them when
-# they re-pin to the SHA of the next release, not automatically via a tag.
+# each SHA and its trailing `# v...` comment. The fleet policy accepts any full
+# commit SHA (it keeps no list of SHAs), so a bump needs no re-pin anywhere. Our OWN
+# gainratio/ci refs must be full commit SHAs and never a moving `@ci-vN` tag; because
+# consumers pin a SHA too, a bump reaches them when they re-pin, not via a tag.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        update-types: ["minor", "patch"]
+    ignore:
+      # Major versions are migrated by hand, never by Dependabot.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "ci"
