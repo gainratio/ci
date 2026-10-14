@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import chain
 from types import MappingProxyType
-from typing import Final, Literal, TypeIs
+from typing import Final, TypeIs
 
 import tree_sitter_typescript as ts_typescript
 import yaml
@@ -98,7 +98,8 @@ ALIAS_FLOW_PASSES: Final = 4
 # engine's nested-Worker OPFS and macOS runners have no container runtime, so these jobs run
 # natively. Keyed on exact (repository, workflow path, job id) AND a macOS runner; mirrors
 # almamesh's NATIVE_MACOS_LANES contract (tests/dagger-ingress-contract.test.ts). Pinned actions,
-# read-only permissions, no credentials, and no pull_request_target still hold.
+# read-only permissions, no credentials, and no pull_request_target still hold. No job here is a
+# result gate: almamesh deploy acceptance reads the Safari workflow's own conclusion.
 NATIVE_LANE_WORKFLOW: Final = ".github/workflows/webkit-macos.yml"
 NATIVE_MACOS_LANES: Final = frozenset(
     (
@@ -106,13 +107,12 @@ NATIVE_MACOS_LANES: Final = frozenset(
             ("almamesh", NATIVE_LANE_WORKFLOW, job)
             for job in ("webkit-memory", "webkit-travel", "webkit-portable")
         ),
-        # Advisory real-Safari smoke (safaridriver). Its own workflow, so a red smoke never
-        # fails the WebKit (macOS) run that deploy acceptance reads; it has no result gate.
+        # Real-Safari smoke (safaridriver). Its own workflow, and deploy-blocking: deploy
+        # acceptance waits for it to be green. The WebKit lanes above are report-only
+        # (continue-on-error), so nothing gates on their results.
         ("almamesh", ".github/workflows/safari-smoke.yml", "safari-smoke"),
     )
 )
-# The one stable acceptance job that only tests the lanes' results (deploy gates on its name).
-NATIVE_LANE_GATES: Final = frozenset((("almamesh", NATIVE_LANE_WORKFLOW, "webkit-macos"),))
 # Literal GitHub-hosted macOS labels only: never an expression, a list, or a self-hosted label.
 MACOS_RUNNER: Final = re.compile(
     r"macos-(?:latest|1[3-9]|2[0-9])(?:-(?:large|xlarge|intel|arm64))?"
@@ -131,9 +131,6 @@ NATIVE_CREDENTIAL: Final = re.compile(
     r"|\bgithub\s*(?:[,)]|\.\s*token\b|\[\s*\\?['\"]token\\?['\"]\s*\])",
     re.IGNORECASE,
 )
-GATE_RUN: Final = re.compile(r'test "\$[A-Z_]+" = success(?: && test "\$[A-Z_]+" = success)*')
-GATE_VARIABLE: Final = re.compile(r"\$([A-Z_]+)")
-NEEDS_RESULT: Final = re.compile(r"\$\{\{ needs\.([\w-]+)\.result \}\}")
 
 
 def central_prefixes(subpath: str) -> tuple[str, ...]:
@@ -1141,15 +1138,12 @@ def validate_job(
 ) -> tuple[PolicyFinding, ...]:
     """The only per-job entry point: base checks, then the one native-lane decision.
 
-    Every job gets the base checks. A reviewed native lane or gate adds its safety rules in
-    place of the thin-ingress shape rules; every other job gets defaults and shape rules.
+    Every job gets the base checks. A reviewed native lane adds its safety rules in place of
+    the thin-ingress shape rules; every other job gets defaults and shape rules.
     """
     base = validate_base_job(scope.path, job.steps, engine)
-    kind = native_exception(scope, job)
-    if kind == "lane":
+    if is_native_lane(scope, job):
         return base + validate_native_lane(document, scope.path, job)
-    if kind == "gate":
-        return base + validate_native_gate(document, scope, job)
     return (
         base
         + validate_job_defaults(scope.path, job)
@@ -1157,12 +1151,10 @@ def validate_job(
     )
 
 
-def native_exception(scope: JobScope, job: WorkflowJob) -> Literal["lane", "gate"] | None:
-    """Decide once whether a job is a reviewed native lane, its gate, or neither."""
+def is_native_lane(scope: JobScope, job: WorkflowJob) -> bool:
+    """Decide once whether a job is a reviewed native macOS lane on a hosted macOS runner."""
     key = (scope.repository, scope.path, scope.job_id)
-    if key in NATIVE_MACOS_LANES and MACOS_RUNNER.fullmatch(job.runs_on or ""):
-        return "lane"
-    return "gate" if key in NATIVE_LANE_GATES else None
+    return key in NATIVE_MACOS_LANES and MACOS_RUNNER.fullmatch(job.runs_on or "") is not None
 
 
 def validate_job_defaults(path: str, job: WorkflowJob) -> tuple[PolicyFinding, ...]:
@@ -1286,63 +1278,6 @@ def triggers_are_unprivileged(document: WorkflowDocument) -> bool:
     """Allow only reviewed PR-scoped events; fail closed on an `on` shape that cannot be read."""
     triggers = workflow_triggers(document)
     return triggers is not None and triggers <= NATIVE_TRIGGERS
-
-
-def validate_native_gate(
-    document: WorkflowDocument, scope: JobScope, job: WorkflowJob
-) -> tuple[PolicyFinding, ...]:
-    """Allow the acceptance job only to test the results of allowlisted lanes."""
-    shape = (
-        ()
-        if native_gate_is_exact(scope, job)
-        else (finding("native-gate-shape", scope.path, "gate may only test native lane results"),)
-    )
-    return validate_native_boundary(document, scope.path, job) + shape
-
-
-def native_gate_is_exact(scope: JobScope, job: WorkflowJob) -> bool:
-    """Require needs on reviewed lanes only and one step that tests exactly their results."""
-    needs = needed_jobs(job)
-    lanes = frozenset((scope.repository, scope.path, need) for need in needs)
-    single = job.steps[0] if len(job.steps) == 1 else None
-    return all(
-        (
-            bool(needs),
-            lanes <= NATIVE_MACOS_LANES,
-            single is not None and gate_step_is_exact(single, needs),
-        )
-    )
-
-
-def needed_jobs(job: WorkflowJob) -> frozenset[str]:
-    """Return the job ids a job declares in `needs`, in either string or list form."""
-    return frozenset((job.needs,) if isinstance(job.needs, str) else (job.needs or ()))
-
-
-def gate_step_is_exact(step: WorkflowStep, needs: frozenset[str]) -> bool:
-    """Accept only `test "$X" = success` clauses over env bound to needed lanes' results."""
-    run = step.run or ""
-    return all(
-        (
-            step_is_bare_run(step),
-            GATE_RUN.fullmatch(run) is not None,
-            frozenset(GATE_VARIABLE.findall(run)) == frozenset(step.env),
-            gate_results(step) == needs,
-        )
-    )
-
-
-def step_is_bare_run(step: WorkflowStep) -> bool:
-    """Report whether a step is a plain run with no action, inputs, shell, or directory."""
-    return all((step.uses is None, not step.with_, step.shell is None, not step.working_directory))
-
-
-def gate_results(step: WorkflowStep) -> frozenset[str] | None:
-    """Return the lane ids whose results a step's env binds, or None if any env is not one."""
-    matches = tuple(NEEDS_RESULT.fullmatch(scalar_text(value)) for value in step.env.values())
-    if not all(matches):
-        return None
-    return frozenset(item.group(1) for item in matches if item)
 
 
 def validate_ingress_shape(
