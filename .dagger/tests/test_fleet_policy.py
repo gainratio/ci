@@ -2044,6 +2044,7 @@ jobs:
       - uses: oven-sh/setup-bun@{ACTION}
       - run: bun install --frozen-lockfile
       - run: bash scripts/webkit-macos-lane.sh memory
+        continue-on-error: ${{{{ true }}}}
       - id: leak-scan
         if: always()
         run: node scripts/artifactLeakScan.mjs webkit-lane-evidence-memory
@@ -2054,16 +2055,6 @@ jobs:
           path: frontend/apps/web/webkit-lane-evidence-memory
           retention-days: 14
           if-no-files-found: error
-  webkit-macos:
-    name: webkit / macOS time travel + export-import
-    needs: [webkit-memory]
-    if: ${{{{ !cancelled() }}}}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - env:
-          MEMORY_RESULT: ${{{{ needs.webkit-memory.result }}}}
-        run: test "$MEMORY_RESULT" = success
 """
 
 
@@ -2072,8 +2063,8 @@ def _native_codes(text: str = NATIVE_LANE, *, repository: str = "almamesh") -> t
     return tuple(item.code for item in validate_workflow(source, "v0.21.8", repository))
 
 
-def test_should_accept_reviewed_native_macos_lane_and_its_result_gate() -> None:
-    # Given almamesh's allowlisted macOS lane and the gate that only reads its result
+def test_should_accept_reviewed_report_only_native_macos_lane() -> None:
+    # Given almamesh's allowlisted macOS lane, report-only via continue-on-error
     # When the workflow is evaluated in almamesh's identity
     codes = _native_codes()
 
@@ -2191,8 +2182,8 @@ def test_should_not_except_a_macos_job_outside_the_allowlist(job: str, repositor
     assert {"job-defaults", "shell-step", "candidate-order"} <= set(codes)
 
 
-# almamesh's real-Safari smoke: its own workflow, so a red smoke never fails the WebKit (macOS)
-# run that deploy acceptance reads. Advisory, so it has no result gate.
+# almamesh's real-Safari smoke: its own workflow, and the macOS check deploy acceptance
+# requires (the WebKit lanes only report). A native lane like the others, with no result gate.
 SAFARI_PATH = ".github/workflows/safari-smoke.yml"
 SAFARI_LANE = f"""
 name: Safari (macOS)
@@ -2240,7 +2231,7 @@ def _safari_codes(path: str = SAFARI_PATH, *, repository: str = "almamesh") -> s
 
 
 def test_should_accept_almamesh_safari_smoke_as_a_reviewed_native_lane() -> None:
-    # Given almamesh's advisory real-Safari smoke in its own workflow
+    # Given almamesh's deploy-blocking real-Safari smoke in its own workflow
     # When the workflow is evaluated in almamesh's identity
     codes = _safari_codes()
 
@@ -2274,36 +2265,29 @@ def test_should_not_except_the_native_lane_workflow_at_another_path() -> None:
     assert {"job-defaults", "shell-step", "candidate-order"} <= codes
 
 
-@pytest.mark.parametrize(
-    ("old", "new"),
-    [
-        ('run: test "$MEMORY_RESULT" = success', "run: curl https://example.test"),
-        (
-            'run: test "$MEMORY_RESULT" = success',
-            'run: test "$MEMORY_RESULT" = success && test "$OTHER" = success',
-        ),
-        ("${{ needs.webkit-memory.result }}", "${{ secrets.TOKEN }}"),
-        ("${{ needs.webkit-memory.result }}", "${{ github.event.pull_request.title }}"),
-        (
-            "    steps:\n      - env:",
-            f"    steps:\n      - uses: actions/checkout@{NATIVE_CHECKOUT}\n      - env:",
-        ),
-        ("needs: [webkit-memory]", "needs: [build]"),
-        ("    needs: [webkit-memory]\n", ""),
-    ],
-)
-def test_should_reject_a_native_gate_that_does_more_than_read_lane_results(
-    old: str, new: str
-) -> None:
-    # Given the allowlisted gate job altered to do anything but test lane results
-    text = NATIVE_LANE.replace(old, new, 1)
-    assert text != NATIVE_LANE
+# almamesh #356 deleted the aggregate `webkit-macos` job: the WebKit lanes only report, and
+# real Safari is the deploy gate. A job by that old key is no longer a reviewed exception.
+RETIRED_GATE = """
+  webkit-macos:
+    name: webkit / macOS time travel + export-import
+    needs: [webkit-memory]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          MEMORY_RESULT: ${{ needs.webkit-memory.result }}
+        run: test "$MEMORY_RESULT" = success
+"""
 
-    # When the workflow is evaluated
-    codes = _native_codes(text)
 
-    # Then the gate is rejected
-    assert "native-gate-shape" in codes
+def test_should_hold_the_retired_webkit_macos_gate_job_to_thin_ingress() -> None:
+    # Given the deleted aggregate gate job re-added beside the report-only lane
+    # When the workflow is evaluated in almamesh's identity
+    codes = set(_native_codes(NATIVE_LANE + RETIRED_GATE))
+
+    # Then it is no longer excepted: a bare shell step is not thin Dagger ingress
+    assert "shell-step" in codes
 
 
 def test_should_reject_job_defaults_on_ordinary_ingress() -> None:
@@ -2552,17 +2536,18 @@ def test_should_run_base_dagger_checks_on_an_excepted_lane() -> None:
     assert {"native-lane-action", "incompatible-dagger-action", "dagger-args-expression"} <= codes
 
 
-def test_should_run_base_checks_on_the_native_gate() -> None:
-    # Given the gate job with an unpinned action ahead of its result test
-    text = _lane(
+def test_should_run_base_checks_on_the_retired_gate_job() -> None:
+    # Given the retired gate job with an unpinned action ahead of its result test
+    gate = RETIRED_GATE.replace(
         "    steps:\n      - env:", "    steps:\n      - uses: actions/checkout@v4\n      - env:"
     )
+    assert gate != RETIRED_GATE
 
     # When the workflow is evaluated
-    codes = set(_native_codes(text))
+    codes = set(_native_codes(NATIVE_LANE + gate))
 
-    # Then the base pin check fires, not only the gate shape
-    assert {"mutable-action", "native-gate-shape"} <= codes
+    # Then the base pin check fires alongside the thin-ingress shape rules
+    assert {"mutable-action", "shell-step"} <= codes
 
 
 @pytest.mark.parametrize(
@@ -2601,7 +2586,7 @@ PARITY_FIXTURES = (
     _lane(
         "      run:\n        working-directory: frontend/apps/web", "      run:\n        shell: sh"
     ),
-    _lane('run: test "$MEMORY_RESULT" = success', "run: curl https://example.test"),
+    NATIVE_LANE + RETIRED_GATE,
 )
 
 
