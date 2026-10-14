@@ -48,6 +48,12 @@ PYPI_ACTION: Final = "pypa/gh-action-pypi-publish"
 APP_ID: Final = 15368
 ENGINE_VERSION: Final = "v0.21.8"
 ACTION_VERSION: Final = "0.21.8"
+COMPATIBLE_DAGGER_ACTIONS: Final = frozenset(
+    (
+        "496f1b3d8b0d823834c13e67cf8a8e08ca3b9602",
+        "27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77",
+    )
+)
 PRODUCTION_SECRETS: Final = frozenset(
     (
         "BUNDLE_PRIVATE_KEY_B64",
@@ -1466,14 +1472,19 @@ def validate_dagger(
 def validate_action_compatibility(
     path: str, step: WorkflowStep, engine_version: str | None
 ) -> tuple[PolicyFinding, ...]:
-    """Require the action's version input to select the config engine.
+    """Require one reviewed action revision compatible with the config engine."""
+    findings: list[PolicyFinding] = []
+    revision = action_revision(step)
+    if not engine_action_versions_match(step, engine_version):
+        findings.append(finding("incompatible-dagger-engine", path, "engine/action mismatch"))
+    if revision not in COMPATIBLE_DAGGER_ACTIONS:
+        findings.append(finding("incompatible-dagger-action", path, revision))
+    return tuple(findings)
 
-    The action revision itself is not allow-listed: `validate_pinned_actions` already requires a
-    full commit SHA, so Dependabot can move it without anyone re-pinning a copy of the SHA here.
-    """
-    if engine_action_versions_match(step, engine_version):
-        return ()
-    return (finding("incompatible-dagger-engine", path, "engine/action mismatch"),)
+
+def action_revision(step: WorkflowStep) -> str:
+    """Return the immutable action revision or no revision."""
+    return "" if step.uses is None else step.uses.partition("@")[2]
 
 
 def engine_action_versions_match(step: WorkflowStep, engine_version: str | None) -> bool:
