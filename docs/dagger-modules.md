@@ -681,17 +681,23 @@ before the candidate bytes are downloaded, so nothing is trusted before the proo
 
 ## Release status
 
-Shipped in this central change:
+All 9 `gainratio` consumer repositories (`agentic-context-service`, `agentic-saga`, `almamesh`,
+`aml-filter`, `assay`, `edge-proc`, `edge-reco`, `edgeproc-core`, and `privacy-core`) are
+enrolled on the shared Dagger modules (`portfolio-foundation`, `cloudflare-pages`, and
+`python-package`) at pinned 40-character `gainratio/ci` commits, verified continuously by
+`dagger call fleet`.
 
-- reusable foundation and Pages module implementations;
-- opt-in authenticated Pages Functions compilation within the existing one-upload Pages
-  transaction;
-- reusable Python package candidate implementation with source-free official PyPA boundary;
-- exact-SHA dependency and production-environment policy;
-- deterministic Python and TypeScript composition fixtures;
-- real local-TLS provider tests and isolated cold-engine proof.
+Shipped and active across the fleet:
 
-Still pending in the EdgeReco canary rollout (Tasks 10–14): consumer hardening, foundation shadow
-adoption, provider shadow adoption, secure Environment secret migration, exact live deployment
-proof, and removal of proven duplicate local mechanics. No fleet-wide adoption, production
-deployment, package publication, version tag, or registry release is claimed here.
+- `portfolio-foundation` (`source`, `guard`, `envelope`, `verify-envelope`, `green-main`,
+  `green-main-decision`, `release-lineage`, and `release-provenance`);
+- `cloudflare-pages` (one-upload deployment, optional authenticated Pages Functions compilation,
+  and live deployment verification);
+- `python-package` (locked dependency audit, wheel/sdist build, and tag-version alignment before
+  the official PyPA publisher boundary);
+- exact-SHA dependency and production-environment policy enforced by `.dagger/src/ci/fleet_policy.py`
+  and `.dagger/src/ci/fleet_coverage.py`.
+
+The legacy reusable GitHub workflow and composite-action catalog is retired and removed from
+`main`; any live workflow referencing a retired `gainratio/ci` reusable control is rejected by
+`fleet`.
