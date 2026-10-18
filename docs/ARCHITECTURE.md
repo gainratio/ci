@@ -9,6 +9,14 @@ The rule behind both: **GitHub Actions only delivers events; Dagger runs everyth
 workflow file checks out the code and calls one Dagger function. Tests, builds, scans and
 deploys all happen inside Dagger, so the same steps run on a laptop and in GitHub.
 
+```mermaid
+flowchart LR
+    R["9 consumer repos<br/>(almamesh, aml-filter, assay,<br/>edge-proc, edge-reco, edgeproc-core,<br/>privacy-core, agentic-saga,<br/>agentic-context-service)"] -->|"pinned 40-hex SHA in dagger.json"| PF["portfolio-foundation<br/>(guard · envelope · green-main · lineage)"]
+    R -->|"3 static-site repos"| CP["cloudflare-pages<br/>(deploy + live check)"]
+    R -->|"4 Python package repos"| PP["python-package<br/>(audit · wheel · sdist)"]
+    FL["dagger call fleet<br/>(gainratio/ci)"] -.->|"audits main, branch protection,<br/>and module pins daily"| R
+```
+
 For an interactive picture, open the [runtime map](architecture/index.html) (its data is in
 [runtime.architecture.json](architecture/runtime.architecture.json)).
 
