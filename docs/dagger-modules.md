@@ -694,7 +694,7 @@ Shipped and active across the fleet:
 - `cloudflare-pages` (one-upload deployment, optional authenticated Pages Functions compilation,
   and live deployment verification);
 - `python-package` (locked dependency audit, wheel/sdist build, and tag-version alignment before
-  the official PyPA publisher boundary);
+  the source-free official PyPA publisher boundary);
 - exact-SHA dependency and production-environment policy enforced by `.dagger/src/ci/fleet_policy.py`
   and `.dagger/src/ci/fleet_coverage.py`.
 
