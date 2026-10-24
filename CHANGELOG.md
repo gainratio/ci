@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- `poe lint` is now read-only. It ran `ruff check --fix` and `ruff format` in place, so
+  `dagger call ci` could rewrite a dirty tree and still exit 0; the gate now runs
+  `ruff check` and `ruff format --check`, matching the three module gates. A formatting
+  regression fails the gate instead of being silently repaired inside the container.
 - The image mirror now publishes to `ghcr.io/gainratio/mirror/...`. Since the org move, ci's
   `GITHUB_TOKEN` cannot create packages under the `hseshadr` user account
   (`DENIED: The requested installation does not exist`, run 37993357418, 12/16 proven).
