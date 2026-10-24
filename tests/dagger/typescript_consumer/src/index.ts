@@ -19,9 +19,9 @@ const CACHE_NAMESPACE = "fixture-typescript-v1"
 const SECRET_CANARY = ["typescript", "private", "canary"].join("-")
 const ARTIFACT_NAME = "typescript-artifact.txt"
 const TRANSPORT_MARKERS = ["api.cloudflare.com", "api.github.com", "wrangler"]
-const PACKAGE_REPOSITORY = "hseshadr/edgeproc-core"
-const PACKAGE_URL = "https://github.com/hseshadr/edgeproc-core.git"
-const PACKAGE_SHA = "0bf2a8394b205f099b14b71303627ef871715622"
+const PACKAGE_REPOSITORY = "gainratio/edgeproc-core"
+const PACKAGE_URL = "https://github.com/gainratio/edgeproc-core.git"
+const PACKAGE_SHA = "bda5f46bcb73bdebb543252689c57fb5179b30d4"
 const PACKAGE_PROJECT = "edgeproc-core"
 const PACKAGE_VERSION = "0.4.3"
 

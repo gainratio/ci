@@ -44,6 +44,7 @@ class OwnedRepositoryPayload:
     name: str
     archived: bool
     default_branch: str
+    private: bool = False
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,9 @@ def discover_consumers(transport: GitHubTransport, owner: str) -> tuple[str, ...
     return tuple(
         repository.name
         for repository in list_repositories(transport, owner)
-        if not repository.archived and consumes_central(transport, owner, repository)
+        if not repository.archived
+        and not repository.private
+        and consumes_central(transport, owner, repository)
     )
 
 
