@@ -62,8 +62,8 @@ def _json(value: object, status: int = 200) -> HttpResponse:
     return HttpResponse(status=status, body=json.dumps(value))
 
 
-def _repo(name: str, *, archived: bool = False) -> dict[str, object]:
-    return {"name": name, "archived": archived, "default_branch": "main"}
+def _repo(name: str, *, archived: bool = False, private: bool = False) -> dict[str, object]:
+    return {"name": name, "archived": archived, "default_branch": "main", "private": private}
 
 
 def _config(name: str, *sources: str) -> HttpResponse:
@@ -82,13 +82,19 @@ def _config_path(name: str) -> str:
 def _fleet_responses() -> dict[str, HttpResponse]:
     first_page = [_repo(f"filler-{index}") for index in range(98)]
     first_page += [_repo("consumer"), _repo("unrelated")]
-    second_page = [_repo("no-dagger"), _repo("retired", archived=True), _repo("covered")]
+    second_page = [
+        _repo("no-dagger"),
+        _repo("retired", archived=True),
+        _repo("private-consumer", private=True),
+        _repo("covered"),
+    ]
     return {
         LISTING.format(page=1): _json(first_page),
         LISTING.format(page=2): _json(second_page),
         _config_path("consumer"): _config("consumer", CI_SOURCE),
         _config_path("unrelated"): _config("unrelated", OTHER_SOURCE),
         _config_path("retired"): _config("retired", CI_SOURCE),
+        _config_path("private-consumer"): _config("private-consumer", CI_SOURCE),
         _config_path("covered"): _config("covered", OTHER_SOURCE, CI_SOURCE),
     }
 
