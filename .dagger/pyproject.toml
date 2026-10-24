@@ -64,7 +64,7 @@ branch = true
 omit = ["src/ci/fleet_cli.py"]
 
 [tool.poe.tasks]
-lint = { shell = "ruff check --fix src tests && ruff format src tests" }
+lint = { shell = "ruff check src tests && ruff format --check src tests" }
 typecheck = "mypy --strict src tests"
 complexity = "xenon --max-absolute A --max-modules A --max-average A src"
 test = "pytest tests --cov=ci --cov-branch --cov-fail-under=90"
