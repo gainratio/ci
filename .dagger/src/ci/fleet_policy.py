@@ -635,7 +635,7 @@ def validate_dependency_source(
 ) -> tuple[PolicyFinding, ...]:
     """Classify mutable GitHub refs separately from unsupported dependency syntax."""
     source = dependency.source
-    if source.startswith("github.com/") and RAW_PINNED_REMOTE.fullmatch(source) is None:
+    if source.split("/", 1)[0] == "github.com" and RAW_PINNED_REMOTE.fullmatch(source) is None:
         return (finding("mutable-dagger-dependency", config.path, source),)
     if parse_pinned_remote(source) is not None:
         return ()
