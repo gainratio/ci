@@ -36,11 +36,11 @@ PAYLOAD_PARTS: Final = (
 )
 EXPECTED_FINDINGS: Final = 2
 STATELESS_CANARY_MISS: Final = "guard-canary-missed: stateless"
-PACKAGE_REPOSITORY: Final = "gainratio/edgeproc-core"
-PACKAGE_URL: Final = "https://github.com/gainratio/edgeproc-core.git"
-PACKAGE_SHA: Final = "bda5f46bcb73bdebb543252689c57fb5179b30d4"
+PACKAGE_REPOSITORY: Final = "gainratio/edge-proc"
+PACKAGE_URL: Final = "https://github.com/gainratio/edge-proc.git"
+PACKAGE_SHA: Final = "1e5e863f4012710da82a27808b66e3fabc3ee9b9"
 PACKAGE_PROJECT: Final = "edgeproc-core"
-PACKAGE_VERSION: Final = "0.4.3"
+PACKAGE_VERSION: Final = "0.5.1"
 PACKAGE_PRODUCT_COUNT: Final = 2
 
 
