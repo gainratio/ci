@@ -1205,6 +1205,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "dagger-io" },
+    { name = "msgpack" },
     { name = "pydantic" },
 ]
 
@@ -1223,6 +1224,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dagger-io", editable = "sdk" },
+    { name = "msgpack", specifier = ">=1.2.3" },
     { name = "pydantic", specifier = ">=2.11,<3" },
 ]
 
