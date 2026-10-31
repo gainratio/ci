@@ -79,7 +79,7 @@ def test_should_pin_fixture_engine_and_exact_local_dependencies() -> None:
     dependencies = tuple(_dependencies(config) for config in configs)
 
     # Then both consumers use the current engine and exact local modules
-    assert engines == ("v0.21.8", "v0.21.8")
+    assert engines == ("v0.21.10", "v0.21.10")
     assert all(items == _expected_dependencies() for items in dependencies)
 
 

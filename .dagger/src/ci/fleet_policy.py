@@ -46,7 +46,7 @@ UPLOAD_ACTION: Final = "actions/upload-artifact"
 DOWNLOAD_ACTION: Final = "actions/download-artifact"
 PYPI_ACTION: Final = "pypa/gh-action-pypi-publish"
 APP_ID: Final = 15368
-ENGINE_VERSION: Final = "v0.21.8"
+ENGINE_VERSION: Final = "v0.21.10"
 ACTION_VERSION: Final = "0.21.8"
 COMPATIBLE_DAGGER_ACTIONS: Final = frozenset(
     (

@@ -92,7 +92,7 @@ def _responses() -> dict[str, HttpResponse]:
             json.dumps(
                 {
                     "name": "example",
-                    "engineVersion": "v0.21.8",
+                    "engineVersion": "v0.21.10",
                     "sdk": {"source": "python"},
                     "dependencies": [
                         {"name": "foundation", "source": dependency, "pin": foundation_sha}
@@ -106,7 +106,7 @@ def _responses() -> dict[str, HttpResponse]:
             json.dumps(
                 {
                     "name": "portfolio-foundation",
-                    "engineVersion": "v0.21.8",
+                    "engineVersion": "v0.21.10",
                     "sdk": {"source": "python"},
                     "source": ".dagger",
                 }
@@ -456,7 +456,7 @@ def test_should_terminate_recursive_cycle_while_preserving_graph_edges() -> None
         json.dumps(
             {
                 "name": "portfolio-foundation",
-                "engineVersion": "v0.21.8",
+                "engineVersion": "v0.21.10",
                 "sdk": {"source": "python"},
                 "dependencies": [
                     {"name": "consumer", "source": f"github.com/gainratio/example@{SHA}"}
@@ -501,7 +501,7 @@ def test_should_resolve_local_dependency_and_not_fetch_mutable_remote() -> None:
         json.dumps(
             {
                 "name": "example",
-                "engineVersion": "v0.21.8",
+                "engineVersion": "v0.21.10",
                 "sdk": {"source": "python"},
                 "dependencies": [
                     {"name": "local", "source": "./modules/local"},
@@ -517,7 +517,7 @@ def test_should_resolve_local_dependency_and_not_fetch_mutable_remote() -> None:
         json.dumps(
             {
                 "name": "local",
-                "engineVersion": "v0.21.8",
+                "engineVersion": "v0.21.10",
                 "sdk": {"source": "python"},
                 "source": ".dagger",
             }
@@ -570,7 +570,7 @@ def test_should_not_fetch_noncanonical_remote_module_path() -> None:
         json.dumps(
             {
                 "name": "evil",
-                "engineVersion": "v0.21.8",
+                "engineVersion": "v0.21.10",
                 "sdk": {"source": "python"},
             }
         ),

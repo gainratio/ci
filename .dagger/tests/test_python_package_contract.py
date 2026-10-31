@@ -21,7 +21,7 @@ def test_should_ship_exact_local_python_package_module() -> None:
 
     # Then it is a same-tree module composed from the exact Foundation Lego
     assert config["name"] == "python-package"
-    assert config["engineVersion"] == "v0.21.8"
+    assert config["engineVersion"] == "v0.21.10"
     assert dependencies == [{"name": "foundation", "source": "../portfolio-foundation"}]
 
 

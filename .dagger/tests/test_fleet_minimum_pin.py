@@ -19,7 +19,7 @@ FOUNDATION = "github.com/hseshadr/ci/modules/portfolio-foundation@"
 
 def _config(identity: str) -> DaggerConfig:
     path = identity.partition("hseshadr/ci/")[2].rpartition("@")[0] + "/dagger.json"
-    return DaggerConfig(identity=identity, path=path, name="shared", engine_version="v0.21.8")
+    return DaggerConfig(identity=identity, path=path, name="shared", engine_version="v0.21.10")
 
 
 def _codes(pin: str, *ancestry: PinAncestry) -> tuple[str, ...]:
@@ -90,7 +90,7 @@ def test_should_ignore_config_when_consumer_owned() -> None:
         identity="github.com/hseshadr/example/modules/portfolio-foundation@" + "e" * 40,
         path="modules/portfolio-foundation/dagger.json",
         name="example",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
     )
 
     # Then only hseshadr/ci modules are floored

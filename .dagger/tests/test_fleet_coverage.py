@@ -69,7 +69,7 @@ def _repo(name: str, *, archived: bool = False, private: bool = False) -> dict[s
 def _config(name: str, *sources: str) -> HttpResponse:
     dependencies = [{"name": f"dep{index}", "source": item} for index, item in enumerate(sources)]
     sdk = {"source": "python"}
-    config = {"name": name, "engineVersion": "v0.21.8", "sdk": sdk, "dependencies": dependencies}
+    config = {"name": name, "engineVersion": "v0.21.10", "sdk": sdk, "dependencies": dependencies}
     text = json.dumps(config)
     encoded = base64.b64encode(text.encode()).decode()
     return _json({"type": "file", "path": "dagger.json", "encoding": "base64", "content": encoded})

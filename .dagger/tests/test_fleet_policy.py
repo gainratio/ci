@@ -255,7 +255,7 @@ def _codes(snapshot: RepositorySnapshot) -> tuple[str, ...]:
     return tuple(finding.code for finding in _findings(snapshot))
 
 
-def _shared_configs(source: str, *, engine: str = "v0.21.8") -> tuple[DaggerConfig, ...]:
+def _shared_configs(source: str, *, engine: str = "v0.21.10") -> tuple[DaggerConfig, ...]:
     pin = source.rpartition("@")[2] if "@" in source else None
     root = DaggerConfig(
         identity=f"github.com/hseshadr/example@{SHA}",
@@ -268,7 +268,7 @@ def _shared_configs(source: str, *, engine: str = "v0.21.8") -> tuple[DaggerConf
         identity=source,
         path="modules/portfolio-foundation/dagger.json",
         name="portfolio-foundation",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
     )
     return (root, shared)
 
@@ -289,7 +289,7 @@ def _provider_configs() -> tuple[DaggerConfig, ...]:
         identity=provider,
         path="modules/cloudflare-pages/dagger.json",
         name="cloudflare-pages",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(DaggerDependency(name="foundation", source="../portfolio-foundation"),),
     )
     return root, shared, provider_config
@@ -300,7 +300,7 @@ def _central_root(*dependencies: DaggerDependency) -> DaggerConfig:
         identity=f"github.com/hseshadr/ci@{SHA}",
         path="dagger.json",
         name="ci",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=dependencies,
     )
 
@@ -310,7 +310,7 @@ def _central_foundation(revision: str = SHA) -> DaggerConfig:
         identity=f"github.com/hseshadr/ci/modules/portfolio-foundation@{revision}",
         path="modules/portfolio-foundation/dagger.json",
         name="portfolio-foundation",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
     )
 
 
@@ -319,7 +319,7 @@ def _central_provider(source: str = "../portfolio-foundation") -> DaggerConfig:
         identity=f"github.com/hseshadr/ci/modules/cloudflare-pages@{SHA}",
         path="modules/cloudflare-pages/dagger.json",
         name="cloudflare-pages",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(DaggerDependency(name="foundation", source=source),),
     )
 
@@ -329,7 +329,7 @@ def _central_python_package(source: str = "../portfolio-foundation") -> DaggerCo
         identity=f"github.com/hseshadr/ci/modules/python-package@{SHA}",
         path="modules/python-package/dagger.json",
         name="python-package",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(DaggerDependency(name="foundation", source=source),),
     )
 
@@ -735,7 +735,7 @@ def test_should_reject_noncanonical_github_module_path(source: str) -> None:
         identity=f"github.com/hseshadr/example@{SHA}",
         path="dagger.json",
         name="example",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(DaggerDependency(name="external", source=source, pin="b" * 40),),
     )
     snapshot = replace(_snapshot(INGRESS), dagger_configs=(root,))
@@ -768,14 +768,14 @@ def test_should_accept_canonical_repository_root_module_with_matching_pin() -> N
         identity=f"github.com/hseshadr/example@{SHA}",
         path="dagger.json",
         name="example",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(DaggerDependency(name="external", source=source, pin="b" * 40),),
     )
     dependency = DaggerConfig(
         identity=source,
         path="dagger.json",
         name="external",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
     )
     snapshot = replace(_snapshot(INGRESS), dagger_configs=(root, dependency))
 
@@ -809,7 +809,7 @@ def test_should_reject_missing_dependency_config_and_recursive_cycle() -> None:
         identity=provider,
         path="modules/cloudflare-pages/dagger.json",
         name="cloudflare-pages",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(DaggerDependency(name="foundation", source=foundation),),
     )
     cycle = replace(_snapshot(INGRESS), dagger_configs=(root, shared, provider_config))
@@ -849,7 +849,7 @@ def test_should_not_require_sdk_lock_before_shared_dependency_adoption() -> None
         identity=f"github.com/hseshadr/example@{SHA}",
         path="dagger.json",
         name="example",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         sdk="python",
         source=".dagger",
     )
@@ -1100,7 +1100,7 @@ def test_should_reject_unrelated_local_dependency_even_in_central_root() -> None
         identity=f"github.com/hseshadr/ci/modules/unrelated@{SHA}",
         path="modules/unrelated/dagger.json",
         name="unrelated",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
     )
     snapshot = replace(
         _snapshot(INGRESS), name="ci", dagger_configs=(_central_root(dependency), unrelated)
@@ -1134,7 +1134,7 @@ def test_should_reject_local_dependency_from_consumer_repository() -> None:
         identity=f"github.com/hseshadr/example@{SHA}",
         path="dagger.json",
         name="example",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(DaggerDependency(name="unrelated", source="modules/unrelated"),),
     )
     snapshot = replace(_snapshot(INGRESS), dagger_configs=(root,))
@@ -2060,7 +2060,7 @@ jobs:
 
 def _native_codes(text: str = NATIVE_LANE, *, repository: str = "almamesh") -> tuple[str, ...]:
     source = SourceFile(path=NATIVE_PATH, text=text)
-    return tuple(item.code for item in validate_workflow(source, "v0.21.8", repository))
+    return tuple(item.code for item in validate_workflow(source, "v0.21.10", repository))
 
 
 def test_should_accept_reviewed_report_only_native_macos_lane() -> None:
@@ -2227,7 +2227,7 @@ jobs:
 
 def _safari_codes(path: str = SAFARI_PATH, *, repository: str = "almamesh") -> set[str]:
     source = SourceFile(path=path, text=SAFARI_LANE)
-    return {item.code for item in validate_workflow(source, "v0.21.8", repository)}
+    return {item.code for item in validate_workflow(source, "v0.21.10", repository)}
 
 
 def test_should_accept_almamesh_safari_smoke_as_a_reviewed_native_lane() -> None:
@@ -2259,7 +2259,7 @@ def test_should_not_except_the_native_lane_workflow_at_another_path() -> None:
     source = SourceFile(path=".github/workflows/other.yml", text=NATIVE_LANE)
 
     # When the workflow is evaluated
-    codes = {item.code for item in validate_workflow(source, "v0.21.8", "almamesh")}
+    codes = {item.code for item in validate_workflow(source, "v0.21.10", "almamesh")}
 
     # Then nothing in it is excepted
     assert {"job-defaults", "shell-step", "candidate-order"} <= codes
@@ -2598,7 +2598,7 @@ def _per_job_findings(text: str, repository: str) -> list[tuple[str, str]]:
         (item.code, item.message)
         for job_id, job in document.jobs.items()
         for item in validate_job(
-            document, JobScope(repository, NATIVE_PATH, job_id), job, "v0.21.8"
+            document, JobScope(repository, NATIVE_PATH, job_id), job, "v0.21.10"
         )
     )
 
@@ -2630,7 +2630,7 @@ def test_should_return_identical_findings_from_every_entry_point(
 
     # When it is validated per job, per workflow, and as part of a repository snapshot
     workflow = sorted(
-        (item.code, item.message) for item in validate_workflow(source, "v0.21.8", repository)
+        (item.code, item.message) for item in validate_workflow(source, "v0.21.10", repository)
     )
     per_job = _per_job_findings(text, repository)
     whole = _repository_findings(text, repository)

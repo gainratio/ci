@@ -172,14 +172,14 @@ def _central_graph(root_owner: str, child_owner: str) -> tuple[DaggerConfig, ...
         identity=f"github.com/{root_owner}/ci@{POLICY_SHA}",
         path="dagger.json",
         name="ci",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
         dependencies=(dependency,),
     )
     child = DaggerConfig(
         identity=f"github.com/{child_owner}/ci/modules/portfolio-foundation@{POLICY_SHA}",
         path="modules/portfolio-foundation/dagger.json",
         name="portfolio-foundation",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
     )
     return root, child
 
@@ -216,7 +216,7 @@ def _floor_codes(owner: str) -> tuple[str, ...]:
         identity=f"github.com/{owner}/ci/modules/portfolio-foundation@" + "e" * 40,
         path="modules/portfolio-foundation/dagger.json",
         name="shared",
-        engine_version="v0.21.8",
+        engine_version="v0.21.10",
     )
     return tuple(item.code for item in validate_minimum_pins((config,), ()))
 

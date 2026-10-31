@@ -80,7 +80,7 @@ def _lineage(call: str, *, module: str = LINEAGE_MODULE, env: str = LINEAGE_ENV)
 
 def _codes(text: str) -> tuple[str, ...]:
     source = SourceFile(path=".github/workflows/publish.yml", text=text)
-    return tuple(item.code for item in validate_workflow(source, "v0.21.8", "example"))
+    return tuple(item.code for item in validate_workflow(source, "v0.21.10", "example"))
 
 
 def _ingress(args: str, extra: str = "") -> str:
@@ -246,7 +246,7 @@ def test_should_reject_a_shell_lineage_step_as_before() -> None:
 def _findings(text: str) -> tuple[tuple[str, str], ...]:
     source = SourceFile(path=".github/workflows/publish.yml", text=text)
     return tuple(
-        (item.code, item.message) for item in validate_workflow(source, "v0.21.8", "example")
+        (item.code, item.message) for item in validate_workflow(source, "v0.21.10", "example")
     )
 
 
