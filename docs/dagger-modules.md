@@ -379,7 +379,7 @@ upstream. Only the registry changes.
    ```yaml
    - uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
      env:
-       _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.8@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336
+       _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.10@sha256:2a7c054e0864e297671c24a0726ebf1c9747d70291b8843b1726daaff200a334
      with:
        version: "0.21.8"
    ```
@@ -564,7 +564,7 @@ graph, and remove only those named resources:
 
 ```bash
 set -euo pipefail
-COLD_ENGINE='registry.dagger.io/engine@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336'
+COLD_ENGINE='registry.dagger.io/engine@sha256:2a7c054e0864e297671c24a0726ebf1c9747d70291b8843b1726daaff200a334'
 COLD_NAME="dagger-module-cold-$$"
 COLD_VOLUME="${COLD_NAME}-state"
 

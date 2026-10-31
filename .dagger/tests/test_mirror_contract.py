@@ -85,7 +85,7 @@ def test_should_pin_every_python_sdk_base_image_to_the_mirror() -> None:
 
 def test_should_start_central_dagger_engines_from_the_mirror() -> None:
     # Given every central workflow except the mirror job, which must not need the mirror
-    expected = "image://" + _pin("registry.dagger.io/engine:v0.21.8")
+    expected = "image://" + _pin("registry.dagger.io/engine:v0.21.10")
     workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
     steps = [
         step

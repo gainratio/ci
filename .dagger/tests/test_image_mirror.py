@@ -233,7 +233,7 @@ def test_should_load_the_committed_manifest_with_unique_digest_pins() -> None:
 
     # Then it covers the Dagger engine and the Python SDK base image
     sources = {image.source for image in images}
-    assert "registry.dagger.io/engine:v0.21.8" in sources
+    assert "registry.dagger.io/engine:v0.21.10" in sources
     assert "docker.io/library/python:3.13.14-slim" in sources
     assert len({image.pin for image in images}) == len(images)
 

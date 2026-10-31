@@ -24,7 +24,7 @@ MODULE_IMAGE: Final = (
     "8b9a8b28d9cc221c6ab5d40e9cfcd99429959f6a8f5171612a99147975ab043f"
 )
 ENGINE_IMAGE: Final = (
-    "ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.8@sha256:"
+    "ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.10@sha256:"
     "c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336"
 )
 # The mirror job copies from upstream on purpose: it must not depend on the mirror it repairs.
