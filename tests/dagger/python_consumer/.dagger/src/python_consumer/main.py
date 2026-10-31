@@ -39,7 +39,7 @@ STATELESS_CANARY_MISS: Final = "guard-canary-missed: stateless"
 PACKAGE_REPOSITORY: Final = "gainratio/edge-proc"
 PACKAGE_URL: Final = "https://github.com/gainratio/edge-proc.git"
 PACKAGE_SHA: Final = "1e5e863f4012710da82a27808b66e3fabc3ee9b9"
-PACKAGE_PROJECT: Final = "edgeproc-core"
+PACKAGE_PROJECT: Final = "edge-proc"
 PACKAGE_VERSION: Final = "0.5.1"
 PACKAGE_PRODUCT_COUNT: Final = 2
 
