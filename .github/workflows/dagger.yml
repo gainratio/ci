@@ -30,7 +30,7 @@ jobs:
           _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.8@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           args: >-
             ci --github-token=env:GITHUB_TOKEN
@@ -54,6 +54,6 @@ jobs:
           _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.8@sha256:c9c1a0a6546380983d42e8d75adde070a2a0935c54b498d8bc9045d9cb2ee336
           GITHUB_TOKEN: ${{ secrets.CONSUMER_DRIFT_TOKEN }}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           args: fleet --github-token=env:GITHUB_TOKEN --include-central
