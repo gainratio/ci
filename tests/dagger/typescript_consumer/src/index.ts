@@ -19,11 +19,11 @@ const CACHE_NAMESPACE = "fixture-typescript-v1"
 const SECRET_CANARY = ["typescript", "private", "canary"].join("-")
 const ARTIFACT_NAME = "typescript-artifact.txt"
 const TRANSPORT_MARKERS = ["api.cloudflare.com", "api.github.com", "wrangler"]
-const PACKAGE_REPOSITORY = "gainratio/edgeproc-core"
-const PACKAGE_URL = "https://github.com/gainratio/edgeproc-core.git"
-const PACKAGE_SHA = "bda5f46bcb73bdebb543252689c57fb5179b30d4"
-const PACKAGE_PROJECT = "edgeproc-core"
-const PACKAGE_VERSION = "0.4.3"
+const PACKAGE_REPOSITORY = "gainratio/edge-proc"
+const PACKAGE_URL = "https://github.com/gainratio/edge-proc.git"
+const PACKAGE_SHA = "1e5e863f4012710da82a27808b66e3fabc3ee9b9"
+const PACKAGE_PROJECT = "edge-proc"
+const PACKAGE_VERSION = "0.5.1"
 
 @object()
 export class TypescriptConsumer {

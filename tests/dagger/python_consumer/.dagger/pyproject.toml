@@ -2,7 +2,7 @@
 name = "python-consumer"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["dagger-io"]
+dependencies = ["dagger-io", "msgpack>=1.2.3"]
 
 [dependency-groups]
 dev = [
@@ -45,3 +45,6 @@ disallow_any_explicit = true
 lint = { shell = "ruff check --fix src && ruff format src" }
 typecheck = "mypy --strict src"
 complexity = "xenon --max-absolute A --max-modules A --max-average A src"
+
+[tool.uv]
+override-dependencies = ["msgpack>=1.2.3"]

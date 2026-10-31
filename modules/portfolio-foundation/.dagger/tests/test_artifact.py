@@ -763,6 +763,8 @@ def test_should_envelope_nested_directory_and_reject_unexpected_input(tmp_path: 
     (source / "dist/nested").mkdir(parents=True)
     (source / "dist/index.html").write_text("index")
     (source / "dist/nested/app.js").write_text("app")
+    os.chmod(source / "dist/index.html", 0o644)
+    os.chmod(source / "dist/nested/app.js", 0o644)
 
     # When
     result = _run_envelope(source, output)
@@ -798,6 +800,9 @@ def test_should_verify_actual_envelope_and_reject_each_mutated_member(tmp_path: 
     source, envelope = tmp_path / "artifact", tmp_path / "envelope"
     (source / "dist").mkdir(parents=True)
     (source / "dist/index.html").write_text("index")
+    # Dagger preserves host modes; the verifier requires canonical 0644 and
+    # GitHub's umask can otherwise produce 0600.
+    os.chmod(source / "dist/index.html", 0o644)
     created = _run_envelope(source, envelope)
     assert created.returncode == 0, created.stderr
 
