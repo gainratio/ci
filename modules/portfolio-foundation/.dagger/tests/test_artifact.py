@@ -763,6 +763,8 @@ def test_should_envelope_nested_directory_and_reject_unexpected_input(tmp_path: 
     (source / "dist/nested").mkdir(parents=True)
     (source / "dist/index.html").write_text("index")
     (source / "dist/nested/app.js").write_text("app")
+    os.chmod(source / "dist/index.html", 0o644)
+    os.chmod(source / "dist/nested/app.js", 0o644)
 
     # When
     result = _run_envelope(source, output)
