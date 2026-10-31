@@ -2,7 +2,7 @@
 name = "python-consumer"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["dagger-io"]
+dependencies = ["dagger-io", "msgpack>=1.2.3"]
 
 [dependency-groups]
 dev = [
