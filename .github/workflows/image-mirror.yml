@@ -41,7 +41,7 @@ jobs:
           # Engine config: Docker Hub pulls go through the mirrors in .github/xdg/dagger/engine.json.
           XDG_CONFIG_HOME: ${{ github.workspace }}/.github/xdg
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           args: image-mirror-verify
   sync:
@@ -62,6 +62,6 @@ jobs:
           XDG_CONFIG_HOME: ${{ github.workspace }}/.github/xdg
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           args: image-mirror --github-token=env:GITHUB_TOKEN

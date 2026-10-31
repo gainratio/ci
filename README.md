@@ -56,7 +56,7 @@ Upgrading is a pull request in the consumer that changes the commit in both `sou
 
 ## Try it
 
-You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
+You need Docker and [Dagger 0.21.10](https://docs.dagger.io/install).
 
 1. List what the foundation module offers, straight from GitHub (about 15 seconds):
 
@@ -126,7 +126,7 @@ failure, not a skip.
 ## What it does not do
 
 - **It is for Harish's repos.** The modules assume his setup: GitHub, Cloudflare Pages,
-  PyPI, Dagger 0.21.8. You can read and borrow from them, but there is no support promise.
+  PyPI, Dagger 0.21.10. You can read and borrow from them, but there is no support promise.
 - **No reusable GitHub workflows or composite actions.** The old ones were removed; they
   are in Git history and old tags only.
 - **It never publishes anything.** No package, tag or registry upload comes from this repo.

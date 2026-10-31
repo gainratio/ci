@@ -57,7 +57,7 @@ NPM_PUBLISHER = f"""      - uses: dagger/dagger-for-github@{DAGGER}
         env:
           HEAD_SHA: ${{{{ github.event.workflow_run.head_sha }}}}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           module: github.com/hseshadr/example@${{{{ github.sha }}}}
           args: >-
@@ -71,7 +71,7 @@ NPM_PUBLISHER = f"""      - uses: dagger/dagger-for-github@{DAGGER}
 def _lineage(call: str, *, module: str = LINEAGE_MODULE, env: str = LINEAGE_ENV) -> str:
     return f"""      - uses: dagger/dagger-for-github@{DAGGER}
 {env}        with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           module: {module}
           args: {call}
@@ -99,7 +99,7 @@ jobs:
         env:
           TAG: ${{{{ inputs.tag }}}}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           args: {args}
 {extra}"""

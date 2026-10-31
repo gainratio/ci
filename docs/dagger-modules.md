@@ -9,7 +9,7 @@ same bytes until it deliberately upgrades.
 
 ## Quickstart
 
-Prerequisites: Git, Bash, Dagger 0.21.8, and an existing Dagger module in the consumer repository.
+Prerequisites: Git, Bash, Dagger 0.21.10, and an existing Dagger module in the consumer repository.
 After the guarded central release is merged, run this from the consumer module root:
 
 ```bash

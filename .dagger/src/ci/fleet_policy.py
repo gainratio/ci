@@ -47,7 +47,7 @@ DOWNLOAD_ACTION: Final = "actions/download-artifact"
 PYPI_ACTION: Final = "pypa/gh-action-pypi-publish"
 APP_ID: Final = 15368
 ENGINE_VERSION: Final = "v0.21.10"
-ACTION_VERSION: Final = "0.21.8"
+ACTION_VERSION: Final = "0.21.10"
 COMPATIBLE_DAGGER_ACTIONS: Final = frozenset(
     (
         "496f1b3d8b0d823834c13e67cf8a8e08ca3b9602",
@@ -1398,7 +1398,7 @@ def validate_dagger(
     """Require the reviewed immutable Dagger call boundary."""
     findings: list[PolicyFinding] = []
     if engine_version is None and scalar_text(step.with_.get("version")) != ACTION_VERSION:
-        findings.append(finding("dagger-version", path, "Dagger 0.21.8 required"))
+        findings.append(finding("dagger-version", path, "Dagger 0.21.10 required"))
     if not dagger_invocation_is_owned(step):
         findings.append(finding("dagger-verb", path, "Dagger call/check input required"))
     return tuple(findings)

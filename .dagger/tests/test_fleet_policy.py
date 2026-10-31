@@ -82,7 +82,7 @@ jobs:
           persist-credentials: false
       - uses: dagger/dagger-for-github@{DAGGER}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           args: ci --commit-sha=${{{{ github.sha }}}}
 """
@@ -104,7 +104,7 @@ jobs:
           persist-credentials: false
       - uses: dagger/dagger-for-github@{DAGGER}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           args: release-candidate --commit-sha=${{{{ github.sha }}}} export --path=release
       - uses: actions/upload-artifact@{UPLOAD}
@@ -130,7 +130,7 @@ def _lineage_step(function: str) -> str:
           RUN_ID: ${{{{ github.event.workflow_run.id }}}}
           HEAD_SHA: {HEAD_SHA}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           module: github.com/hseshadr/ci/modules/portfolio-foundation@{"e" * 40}
           args: {function}
@@ -200,7 +200,7 @@ jobs:
         env:
           HEAD_SHA: {HEAD_SHA}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           module: github.com/hseshadr/example@{HEAD_SHA}
           args: {NPM_ARGS}
@@ -656,7 +656,7 @@ def test_should_accept_exact_remote_dagger_plan_before_official_pypi() -> None:
     # Given Assay's source-free exact-SHA Dagger decision before official PyPI
     plan = f"""      - uses: dagger/dagger-for-github@{DAGGER}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           module: github.com/hseshadr/example@{HEAD_SHA}
           args: pypi-required --candidate=release --expected-sha="$HEAD_SHA"
@@ -2525,7 +2525,7 @@ def test_should_run_base_dagger_checks_on_an_excepted_lane() -> None:
     text = _lane(
         f"      - uses: oven-sh/setup-bun@{ACTION}",
         f"      - uses: dagger/dagger-for-github@{'9' * 40}\n"
-        "        with:\n          version: '0.21.8'\n"
+        "        with:\n          version: '0.21.10'\n"
         "          args: ${{ github.event.pull_request.title }}",
     )
 

@@ -65,7 +65,7 @@ Only four workflows exist:
 Each job uses exactly two pinned actions:
 
 1. `actions/checkout` with `persist-credentials: false`
-2. `dagger/dagger-for-github` pinned to a full commit SHA and Dagger 0.21.8
+2. `dagger/dagger-for-github` pinned to a full commit SHA and Dagger 0.21.10
 
 The module receives source through an explicit typed `dagger.Workspace` and stores an explicit
 `dagger.Directory`. Credentials cross public Dagger functions as `dagger.Secret`. Generated SDK

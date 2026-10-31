@@ -73,7 +73,7 @@ def test_should_state_true_facts_about_modules_and_checks() -> None:
     text = README.read_text()
 
     # When the reader looks for what the repo ships and how to run it
-    required = (*MODULES, "dagger call ci", "Dagger 0.21.8", "dagger.json", '"pin"')
+    required = (*MODULES, "dagger call ci", "Dagger 0.21.10", "dagger.json", '"pin"')
 
     # Then every shared module and the real local command are named
     assert all(fragment in text for fragment in required)
