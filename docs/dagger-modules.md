@@ -181,7 +181,7 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           module: github.com/gainratio/ci/modules/portfolio-foundation@3de1c4bef2558fd6610b6dda1504b657de7a954d
           args: release-lineage --github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" --head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"
@@ -289,7 +289,7 @@ event values:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           call: ci --commit-sha=${{ github.sha }} --base-sha="$BASE_SHA"
 ```
 
@@ -381,12 +381,12 @@ upstream. Only the registry changes.
      env:
        _EXPERIMENTAL_DAGGER_RUNNER_HOST: image://ghcr.io/gainratio/mirror/registry.dagger.io/engine:v0.21.10@sha256:2a7c054e0864e297671c24a0726ebf1c9747d70291b8843b1726daaff200a334
      with:
-       version: "0.21.8"
+       version: "0.21.10"
    ```
 
 2. Pin the Python SDK runtime image. If `pyproject.toml` declares a Python version and sets no
    `base-image`, the SDK pulls `python:<version>-slim` from Docker Hub by tag, with no digest
-   (`sdk/python/runtime/discovery.go`, `parseBaseImage`, v0.21.8). Set it explicitly in the
+   (`sdk/python/runtime/discovery.go`, `parseBaseImage`, v0.21.10). Set it explicitly in the
    module's `pyproject.toml`:
 
    ```toml
@@ -397,7 +397,7 @@ upstream. Only the registry changes.
 3. TypeScript modules: set `"dagger": {"baseImage": "<mirror pin>"}` in the module's
    `package.json` for the Node runtime image. The SDK's introspector and library generator
    always run `oven/bun:1.3.0-alpine` and ignore `baseImage`
-   (`sdk/typescript/runtime/introspector.go`, v0.21.8), so also give the engine a Docker Hub
+   (`sdk/typescript/runtime/introspector.go`, v0.21.10), so also give the engine a Docker Hub
    mirror. The CLI mounts `$XDG_CONFIG_HOME/dagger/engine.json` into the engine it starts
    (`engine/client/drivers/container.go`), and the engine tries each mirror before Docker Hub.
    `mirror.gcr.io` is Google's Docker Hub cache, the fallback for an image not yet mirrored.
@@ -657,7 +657,7 @@ The fleet policy accepts exactly this leading step and nothing weaker (`publishe
           RUN_ID: ${{ github.event.workflow_run.id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         with:
-          version: "0.21.8"
+          version: "0.21.10"
           verb: call
           module: github.com/gainratio/ci/modules/portfolio-foundation@<40-hex ci SHA>
           args: release-lineage --github-token=env:GH_TOKEN --repository="$GITHUB_REPOSITORY" --run-id="$RUN_ID" --head-sha="$HEAD_SHA" --publish-run-id="$GITHUB_RUN_ID"
