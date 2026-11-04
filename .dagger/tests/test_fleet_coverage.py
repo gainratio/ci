@@ -38,6 +38,7 @@ ORG_LISTING = "orgs/gainratio/repos?type=all&per_page=100&page={page}"
 KNOWN_CONSUMERS = (
     "agentic-context-service",
     "agentic-saga",
+    "agentic-tab-context",
     "almamesh",
     "aml-filter",
     "assay",
@@ -160,7 +161,7 @@ def test_should_cover_every_known_ci_consumer_in_reviewed_expectations() -> None
     assert missing == ()
 
 
-@pytest.mark.parametrize("name", ["agentic-context-service", "agentic-saga"])
+@pytest.mark.parametrize("name", ["agentic-context-service", "agentic-saga", "agentic-tab-context"])
 def test_should_hold_agentic_consumers_to_the_sole_dagger_contract(name: str) -> None:
     # Given an agentic consumer that already declares shared foundation
     # When its reviewed expectation is selected

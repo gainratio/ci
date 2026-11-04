@@ -1943,7 +1943,7 @@ def test_should_report_stale_foundation_pin_through_repository_contract() -> Non
     assert codes == ("pin-below-required-minimum",)
 
 
-BROKEN_MODULE = "import dagger\n\ntry:\n    run()\nexcept OSError, ValueError:\n    pass\n"
+BROKEN_MODULE = "import dagger\n\ntry:\n    run()\nexcept OSError as error, ValueError:\n    pass\n"
 
 
 def test_should_report_unparsable_python_module_as_finding_not_crash() -> None:

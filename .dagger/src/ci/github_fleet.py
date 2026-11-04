@@ -337,11 +337,11 @@ class ProtectionPayload:
 
     required_status_checks: StatusChecksPayload
     enforce_admins: EnabledPayload
-    required_pull_request_reviews: ReviewsPayload
     required_conversation_resolution: EnabledPayload
     required_linear_history: EnabledPayload
     allow_force_pushes: EnabledPayload
     allow_deletions: EnabledPayload
+    required_pull_request_reviews: ReviewsPayload | None = None
 
 
 @validated_dataclass(config=BOUNDARY_CONFIG)
@@ -786,10 +786,11 @@ def read_protection(transport: GitHubTransport, base: str) -> Protection:
     """Translate effective REST protection without losing app identity."""
     payload = read_model(transport, f"{base}/branches/main/protection", ProtectionPayload)
     checks = build_required_checks(payload.required_status_checks.checks)
+    reviews = payload.required_pull_request_reviews
     return Protection(
         strict=payload.required_status_checks.strict,
         enforce_admins=payload.enforce_admins.enabled,
-        approvals=payload.required_pull_request_reviews.required_approving_review_count,
+        approvals=0 if reviews is None else reviews.required_approving_review_count,
         conversation_resolution=payload.required_conversation_resolution.enabled,
         linear_history=payload.required_linear_history.enabled,
         allow_force_pushes=payload.allow_force_pushes.enabled,
