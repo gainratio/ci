@@ -814,3 +814,18 @@ def test_should_fail_closed_when_previous_main_cannot_be_read(
     # When / Then the scan stops instead of skipping the check
     with pytest.raises(FleetAccessError):
         read_repository(FakeTransport(responses), "gainratio", "example")
+
+
+def test_should_treat_omitted_pull_request_reviews_as_zero_approvals() -> None:
+    # Given GitHub omits required_pull_request_reviews when PR review requirements are off
+    responses = _responses()
+    protection_path = "repos/gainratio/example/branches/main/protection"
+    payload = json.loads(responses[protection_path].body)
+    del payload["required_pull_request_reviews"]
+    responses[protection_path] = _json(payload)
+
+    # When the repository protection is read
+    snapshot = read_repository(FakeTransport(responses), "gainratio", "example")
+
+    # Then approvals is treated as 0 without failing schema validation
+    assert snapshot.protection.approvals == 0

@@ -34,6 +34,7 @@ def repository_expectations(include_central: bool) -> tuple[RepositoryExpectatio
     consumers = (
         expectation("agentic-context-service"),
         expectation("agentic-saga"),
+        expectation("agentic-tab-context"),
         expectation("almamesh", grandfathered_until=date(2026, 12, 15)),
         RepositoryExpectation(
             name="aml-filter",
