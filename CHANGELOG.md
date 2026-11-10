@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased — Dagger-only control plane
+All notable changes to `gainratio/ci` are documented in this file.
+
+## [Unreleased]
+
+Dagger-only control plane: reusable Dagger modules (`portfolio-foundation`, `cloudflare-pages`,
+`python-package`) pinned by 40-character commit SHA and daily consumer policy verification.
 
 ### Fixed
 
@@ -87,7 +92,7 @@
   effective branch protection, exact-SHA checks, or CodeQL metadata.
 - Behavioral policy for thin pinned Dagger ingress and the two narrow artifact transport
   and source-free OIDC publisher exceptions.
-- Hosted fleet scanning against exact `main` identities for all seven consumers and
+- Hosted fleet scanning against exact `main` identities for all ten consumers and
   this repository.
 - Regression coverage for explicit Workspace source, generated SDK separation, typed
   Secrets, app-bound protection, stale checks, privileged publishers, and incomplete API
@@ -122,3 +127,17 @@
 
 Older reusable-workflow releases remain available in Git history and existing tags. They
 are retired and are not part of the current architecture.
+
+## [3.3.0] - 2026-08-25
+
+Tagged as `ci-v3.3.0` (`8166345c9355dde54c12fa95d0457c4ea97d3e64`) on the legacy reusable-workflow stack prior to the Dagger-only control-plane cutover.
+
+### Added
+
+- Optional `full-history` boolean input on legacy `secret-scan.yml` to run an explicit `gitleaks git --log-opts=--all` history sweep on scheduled and tag-triggered workflows (#25).
+- Static caller-permission sufficiency scanner (`scan-caller-permissions.rb`) verifying workflow caller grants against callee permissions so under-granted workflows fail policy checks instead of silently dying with `startup_failure` and zero check runs (#25).
+
+### Fixed
+
+- Enforced machine-checked full-history secret-scan coverage across consumer `security-audit.yml` schedules and prevented secret exfiltration in failure logs (#25).
+- Recorded EdgeProc release-scan drift (#20) and backfilled skipped `3.2.x` release entries in `CHANGELOG.md` (#17).

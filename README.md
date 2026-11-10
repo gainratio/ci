@@ -2,7 +2,7 @@
 
 The shared CI code for Harish Seshadri's own repositories: three Dagger modules they install, and a daily check that each repo still runs its CI the same way.
 
-**Try it without cloning:** `dagger -m github.com/gainratio/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions`
+**Try it without cloning:** `dagger -m github.com/gainratio/ci/modules/portfolio-foundation@212ebda9af58a1321221e5d7ab530b378e91a011 functions`
 
 [Dagger](https://dagger.io) runs CI steps as code inside containers, so the same steps run on
 a laptop and in GitHub Actions. Harish's projects (almamesh, aml-filter, assay, edge-proc,
@@ -28,13 +28,13 @@ aml-filter's, as it is today:
 "dependencies": [
   {
     "name": "cloudflare-pages",
-    "source": "github.com/gainratio/ci/modules/cloudflare-pages@dd19871486588b1582e432b7bc1f2cfffb296340",
-    "pin": "dd19871486588b1582e432b7bc1f2cfffb296340"
+    "source": "github.com/gainratio/ci/modules/cloudflare-pages@8420264d5560b0817579d9c5323ae3a69ce4558d",
+    "pin": "8420264d5560b0817579d9c5323ae3a69ce4558d"
   },
   {
     "name": "foundation",
-    "source": "github.com/gainratio/ci/modules/portfolio-foundation@dd19871486588b1582e432b7bc1f2cfffb296340",
-    "pin": "dd19871486588b1582e432b7bc1f2cfffb296340"
+    "source": "github.com/gainratio/ci/modules/portfolio-foundation@8420264d5560b0817579d9c5323ae3a69ce4558d",
+    "pin": "8420264d5560b0817579d9c5323ae3a69ce4558d"
   }
 ]
 ```
@@ -47,7 +47,7 @@ The three modules:
 
 | Module | What it does | Used by |
 |---|---|---|
-| `portfolio-foundation` | Ties a build to one exact commit, runs secret and workflow scans over the full Git history, and wraps build output with a record of where it came from. | all nine repos |
+| `portfolio-foundation` | Ties a build to one exact commit, runs secret and workflow scans over the full Git history, and wraps build output with a record of where it came from. | all ten repos |
 | `cloudflare-pages` | Deploys a built site to Cloudflare Pages once, then checks the live site is serving that exact deployment. | almamesh, aml-filter, edge-reco |
 | `python-package` | Audits dependencies, builds the wheel and sdist, and checks the version matches the tag. It does not upload to PyPI; a separate job does that with PyPI's official action. | edge-proc, edgeproc-core, agentic-context-service, agentic-saga |
 
@@ -61,17 +61,20 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 1. List what the foundation module offers, straight from GitHub (about 15 seconds):
 
    ```bash
-   dagger -m github.com/gainratio/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e functions
+   dagger -m github.com/gainratio/ci/modules/portfolio-foundation@212ebda9af58a1321221e5d7ab530b378e91a011 functions
    ```
 
    ```text
-   Name              Description
-   envelope          Wrap a typed artifact with deterministic evidence.
-   green-main        Resolve exact-green main evidence using a typed secret.
-   green-main-decision Deploy commit_sha only if it is main's exact-green HEAD; skip it if main moved on.
-   guard             Apply repository security checks to a bound source.
-   source            Bind a supplied workspace to a repository identity.
-   verify-envelope   Revalidate and return only a closed envelope's artifact subtree.
+   Name                 Description
+   docs-only            Return true only when base...head changes nothing but plain Markdown docs.
+   envelope             Wrap a typed artifact with deterministic evidence.
+   green-main           Resolve exact-green main evidence using a typed secret.
+   green-main-decision  Deploy commit_sha only if it is main's exact-green HEAD; skip it if main moved on.
+   guard                Apply repository security checks to a bound source.
+   release-lineage      Prove a release candidate run was built from main before anything publishes it.
+   release-provenance   Prove lineage, then return npm's provenance context for the publish run.
+   source               Bind a supplied workspace to a repository identity.
+   verify-envelope      Revalidate and return only a closed envelope's artifact subtree.
    ```
 
 2. Ask it whether a repo's `main` is green right now. This is the same call aml-filter
@@ -79,7 +82,7 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 
    ```bash
    export GITHUB_TOKEN="$(gh auth token)"
-   dagger -m github.com/gainratio/ci/modules/portfolio-foundation@faf55ac51dfeb6bad274988941e9215117e5259e \
+   dagger -m github.com/gainratio/ci/modules/portfolio-foundation@212ebda9af58a1321221e5d7ab530b378e91a011 \
      call green-main --github-token=env:GITHUB_TOKEN --repository=gainratio/aml-filter serialization
    ```
 
@@ -104,11 +107,17 @@ You need Docker and [Dagger 0.21.8](https://docs.dagger.io/install).
 
    Success ends with `central Dagger gate passed`.
 
+## Under the hood (for developers)
+
+- **Central verifier (`.dagger/src/ci/`):** [`fleet.py`](.dagger/src/ci/fleet.py), [`fleet_policy.py`](.dagger/src/ci/fleet_policy.py), and [`fleet_coverage.py`](.dagger/src/ci/fleet_coverage.py) audit all ten consumer repositories plus `gainratio/ci` against branch protection, exact 40-hex module pins, workflow ingress rules, and publisher lineage.
+- **Shared modules (`modules/`):** [`modules/portfolio-foundation`](modules/portfolio-foundation), [`modules/cloudflare-pages`](modules/cloudflare-pages), and [`modules/python-package`](modules/python-package) each carry their own Python package, strict `mypy` + `ruff` + `xenon` checks, and `>= 90%` branch-coverage test suite.
+- **Digest-pinned container mirror (`mirror/`):** [`mirror/images.json`](mirror/images.json) maps every upstream container digest used by the modules and Dagger engine to `ghcr.io/gainratio/mirror/...`, verified by contract tests so unmirrored images cannot slip in.
+
 ## How it works
 
 ```mermaid
 flowchart LR
-    R["9 consumer repos<br/>(almamesh, aml-filter, assay,<br/>edge-proc, edge-reco, edgeproc-core,<br/>privacy-core, agentic-saga,<br/>agentic-context-service)"] -->|"pinned 40-hex SHA in dagger.json"| PF["portfolio-foundation<br/>(guard · envelope · green-main · lineage)"]
+    R["10 consumer repos<br/>(almamesh, aml-filter, assay,<br/>edge-proc, edge-reco, edgeproc-core,<br/>privacy-core, agentic-saga,<br/>agentic-context-service, agentic-tab-context)"] -->|"pinned 40-hex SHA in dagger.json"| PF["portfolio-foundation<br/>(guard · envelope · green-main · lineage)"]
     R -->|"3 static-site repos"| CP["cloudflare-pages<br/>(deploy + live check)"]
     R -->|"4 Python package repos"| PP["python-package<br/>(audit · wheel · sdist)"]
     FL["dagger call fleet<br/>(gainratio/ci)"] -.->|"audits main, branch protection,<br/>and module pins daily"| R
@@ -164,6 +173,8 @@ change.
   and the [first rollout plan](docs/superpowers/plans/2026-08-27-dagger-lego-edge-reco-canary.md):
   why the shared modules exist.
 - [CHANGELOG](CHANGELOG.md): what changed, including what was removed.
+- [CONTRIBUTING](CONTRIBUTING.md): local checks and rules for changing shared modules.
+- [SECURITY](SECURITY.md): how to report a vulnerability privately.
 
 ## License
 
